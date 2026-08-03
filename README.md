@@ -1,21 +1,31 @@
 # AxData-go
 
-A股量化数据收集与分析平台。Go 语言版，兼容 Python 版 [AxData](https://github.com/axdata/axdata) 的数据模型和 API 规范。
+Go 语言版 AxData —— A股量化数据收集与分析平台，兼容 Python 版 [AxData](https://github.com/axdata/axdata) 的数据模型和 API 规范。
+
+## 特性
+
+- **10 个数据源适配器**：TDX（通达信）、东财、同花顺、新浪财经、腾讯财经、财联社、巨潮资讯、看盘汇、文财、mock
+- **99 个标准接口**：覆盖日线、分钟线、实时行情、板块、题材、龙虎榜、财报等全量数据
+- **63 张表结构定义**：标准化的 Schema Registry，支持 FieldMapping
+- **标准化 ETL 管道**：`Adapter → ProviderRegistry → FieldMapping → Schema → DuckDB/Parquet`
+- **零外部 TDX SDK 依赖**：纯 Go TCP 协议实现通达信 7709 接口
+- **Go workspace 多模块**：每个数据源独立模块，核心模块统一维护
+- **完整测试覆盖**：19 个包，160 个测试函数，全部通过
 
 ## 架构
 
 ```
-┌─────────────────┐    ┌───────────────────┐    ┌────────────────┐
-│  Source Adapter │───▶│  ProviderRegistry  │───▶│  Schema Table  │
-│  (10 sources)   │    │  (99 interfaces)   │    │  (59 tables)   │
-│                 │    │  Field Mapping     │    │  Parquet/DB    │
-└─────────────────┘    └──────────┬────────┘    └────────┬───────┘
-                                   │                     │
-                                   ▼                     ▼
-                          ┌──────────────────┐  ┌────────────────┐
-                          │  Collector       │  │  Querier       │
-                          │  Task Management  │  │  DuckDB SQL     │
-                          └──────────────────┘  └────────────────┘
+┌─────────────┐     ┌───────────────────┐     ┌────────────────┐
+│ Source      │     │ ProviderRegistry   │     │ Schema Table   │
+│ Adapters    │───▶│  (99 interfaces)   │───▶│  (63 tables)   │
+│ (10 sources)│     │  Field Mapping     │     │  Parquet/DB    │
+└─────────────┘     └──────────┬────────┘     └────────┬───────┘
+                               │                       │
+                               ▼                       ▼
+                      ┌──────────────────┐   ┌────────────────┐
+                      │  Collector       │   │  Querier       │
+                      │  Task Management  │   │  DuckDB SQL     │
+                      └──────────────────┘   └────────────────┘
 ```
 
 ## 安装
@@ -31,20 +41,19 @@ Go 1.24+
 ## 快速开始
 
 ```bash
-# 列出所有数据源
+# 查看数据源列表
 ./axdata-go sources list
 
-# 查看所有支持的表和接口
+# 查看可用表和接口
 ./axdata-go data list
 
-# 添加采集任务（以 mock 数据为例）
-./axdata-go collector add --name "mock-daily" --source mock --interface daily --table daily
-
-# 执行采集任务
-./axdata-go collector run
-
-# 查询数据（DuckDB SQL）
-./axdata-go query "SELECT * FROM daily LIMIT 10"
+# 添加采集任务
+./axdata-go collector add \
+  --name "daily" \
+  --source tencent \
+  --interface stock_zh_a_hist_tx \
+  --table daily \
+  --params '{"codes":"000001.SZ,000002.SZ","period":"daily"}'
 
 # 启动 API 服务
 ./axdata-go api serve --port 8080
@@ -54,15 +63,15 @@ Go 1.24+
 
 | 数据源 | 类型 | 协议 | 接口数 | 说明 |
 |--------|------|------|--------|------|
-| **TDX**（通达信） | HTTP | TCP 7709 二进制 | 8 | 日线/分钟线、连板天梯、ST/停牌列表，需要本地通达信客户端 |
-| **腾讯财经** | HTTP | HTTP API | 5 | 实时行情、日K线、指数K线、逐笔成交 |
-| **新浪财经** | HTTP | HTTP API | 4 | 实时行情、日/周/月/年K线、板块排行 |
-| **东方财富** | HTTP | HTTP API | 15 | 实时行情、龙虎榜、融资融券、研报、涨跌停池、异动 |
-| **财联社** | HTTP | HTTP API | 17 | 市场情绪、热门板块/概念/个股、涨停池、行业排行 |
-| **开盘红** | HTTP | HTTP API | 10 | 板块排行、概念详情、连板天梯、市场复盘 |
+| **TDX**（通达信） | 行情 | TCP 7709 二进制 | 8 | 日线/分钟线、连板天梯、ST/停牌列表、题材强度排行，需要本地通达信客户端 |
+| **腾讯财经** | HTTP | HTTP API | 5 | 实时行情快照、个股/指数日K线、逐笔成交 |
+| **新浪财经** | HTTP | HTTP API | 4 | 实时行情、日K/周K/月K/年K、板块排行 |
+| **东方财富** | HTTP | HTTP API | 15 | 实时行情、龙虎榜、融资融券、研报、涨跌停池、异动、交易日 |
+| **财联社** | HTTP | HTTP API | 17 | 市场情绪/风向、热门板块/概念/个股、涨停池、行业排行、市场主线 |
+| **开盘红** | HTTP | HTTP API | 10 | 板块排行、概念详情、连板天梯、市场复盘、涨停/跌停历史 |
 | **同花顺** | HTTP | HTTP API | 1 | 人气榜 |
 | **巨潮资讯** | HTTP | HTTP API | 32 | 公司档案、公告、分红、股东、股权质押、债券、基金持仓 |
-| **i问财** | HTTP | HTTP API | 1 | 自然语言选股策略查询 |
+| **文财（i问财）** | HTTP | HTTP API | 1 | 自然语言选股策略查询 |
 | **mock** | 本地 | 模拟 | 1 | 测试用模拟数据 |
 
 ## 核心概念
@@ -97,7 +106,7 @@ type Adapter interface {
 # 查看任务列表
 ./axdata-go collector list
 
-# 执行任务
+# 执行采集
 ./axdata-go collector run
 
 # 查看任务状态
@@ -108,7 +117,7 @@ type Adapter interface {
 
 ```bash
 # DuckDB SQL 查询
-./axdata-go query "SELECT * FROM daily WHERE trade_date > '2026-01-01'"
+./axdata-go query "SELECT * FROM daily WHERE trade_date > '2026-01-01' LIMIT 10"
 
 # API 查询
 curl "http://localhost:8080/api/query?sql=SELECT * FROM daily LIMIT 10"
@@ -132,9 +141,12 @@ curl "http://localhost:8080/api/query?sql=SELECT * FROM daily LIMIT 10"
 
 ```bash
 # 全量测试
-go test -v -count=1 ./core/... ./source-*/... .
+go test -v -count=1 ./core/... . -timeout 30s
 
-# 单模块
+# 单模块测试
+go test -v -count=1 ./source-cninfo/...
+go test -v -count=1 ./source-eastmoney/...
+go test -v -count=1 ./source-cls/...
 go test -v -count=1 ./source-tencent/...
 
 # 集成测试
@@ -183,7 +195,7 @@ source.Register(mysource.NewMySourceAdapter())
 │   ├── config/          # 配置管理
 │   ├── plugin/          # 插件系统
 │   ├── query/           # DuckDB 查询器
-│   ├── schema/          # 表结构定义（59 张表）
+│   ├── schema/          # 表结构定义（63 张表）
 │   ├── source/          # Provider 注册表（99 个接口）
 │   └── storage/         # Parquet 存储
 ├── source-*/            # 10 个数据源适配器（独立 Go module）
