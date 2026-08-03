@@ -1,11 +1,15 @@
 package collector
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/electkismet/axdata-go/core/config"
 	"github.com/electkismet/axdata-go/core/schema"
+	"github.com/electkismet/axdata-go/core/source"
 	"github.com/electkismet/axdata-go/core/storage"
 	"go.uber.org/zap"
 )
@@ -203,4 +207,261 @@ func TestCollectorTaskCreation(t *testing.T) {
 	if retrieved.Name != "test-task" {
 		t.Errorf("Retrieved task name: got %s, want test-task", retrieved.Name)
 	}
+}
+
+func TestExecuteTask_UnknownSource(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	task, err := collector.AddTask("test-unknown-source", "nonexistent_source_xyz", "daily", "daily", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = collector.executeTask(ctx, task)
+	if err == nil {
+		t.Fatal("Expected error for unknown source")
+	}
+	if !strings.Contains(err.Error(), "unknown source") {
+		t.Errorf("Expected 'unknown source' in error, got: %v", err)
+	}
+}
+
+func TestExecuteTask_AdapterError(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	adapter := &errorAdapter{
+		name: "error-source",
+		err:  fmt.Errorf("connection refused"),
+	}
+	Register(adapter)
+
+	task, err := collector.AddTask("test-adapter-error", "error-source", "daily", "daily", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = collector.executeTask(ctx, task)
+	if err == nil {
+		t.Fatal("Expected error for adapter failure")
+	}
+	if !strings.Contains(err.Error(), "source request") {
+		t.Errorf("Expected 'source request' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "connection refused") {
+		t.Errorf("Expected wrapped 'connection refused' in error, got: %v", err)
+	}
+}
+
+func TestExecuteTask_EmptyResults(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	adapter := &emptyAdapter{name: "empty-source"}
+	Register(adapter)
+
+	task, err := collector.AddTask("test-empty", "empty-source", "daily", "daily", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	rows, err := collector.executeTask(ctx, task)
+	if err != nil {
+		t.Fatalf("executeTask with empty results should not error: %v", err)
+	}
+	if rows != 0 {
+		t.Errorf("Expected 0 rows from empty adapter, got %d", rows)
+	}
+}
+
+func TestExecuteTask_NoOutputTable(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	adapter := &mockDataAdapter{name: "mock-data"}
+	Register(adapter)
+
+	// Use a non-existent interface name so GetOutputTable returns empty
+	task, err := collector.AddTask("test-no-table", "mock-data", "nonexistent_interface", "", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = collector.executeTask(ctx, task)
+	if err == nil {
+		t.Fatal("Expected error for no output table")
+	}
+	if !strings.Contains(err.Error(), "no output table") {
+		t.Errorf("Expected 'no output table' in error, got: %v", err)
+	}
+}
+
+func TestExecuteTask_UnknownSchema(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	adapter := &mockDataAdapter{name: "mock-data"}
+	Register(adapter)
+
+	// Task table points to a schema that doesn't exist
+	task, err := collector.AddTask("test-unknown-schema", "mock-data", "daily", "nonexistent_table_xyz", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = collector.executeTask(ctx, task)
+	if err == nil {
+		t.Fatal("Expected error for unknown table schema")
+	}
+	if !strings.Contains(err.Error(), "unknown table schema") {
+		t.Errorf("Expected 'unknown table schema' in error, got: %v", err)
+	}
+}
+
+func TestExecuteTask_TaskParamOverrides(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	adapter := &mockDataAdapter{name: "mock-data"}
+	Register(adapter)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+	collector, err := NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	// Override table via task params — custom table name in ProviderRegistry
+	provider := source.ProviderRegistry["daily"]
+	if provider == nil {
+		t.Skip("daily provider not in registry, skipping")
+	}
+	// Add a fake interface for this test
+	customIface := "custom_mock_daily"
+	source.ProviderRegistry[customIface] = &source.ProviderInterface{
+		Name:        customIface,
+		SourceCode:  "mock-data",
+		Table:       "daily",
+		Layer:       "core",
+		WriteMode:   "append",
+	}
+	defer func() {
+		delete(source.ProviderRegistry, customIface)
+	}()
+
+	task, err := collector.AddTask("test-override", "mock-data", customIface, "", "core", nil)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+	task.Enabled = true
+
+	ctx := context.Background()
+	_, err = collector.RunTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	if !store.Exists("core", "daily") {
+		t.Fatal("daily table not found in store after task run")
+	}
+}
+
+// errorAdapter always returns an error on Request.
+type errorAdapter struct {
+	name string
+	err  error
+}
+
+func (a *errorAdapter) Name() string           { return a.name }
+func (a *errorAdapter) Description() string    { return "error adapter" }
+func (a *errorAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
+	return nil, a.err
+}
+
+// emptyAdapter always returns nil results.
+type emptyAdapter struct {
+	name string
+}
+
+func (a *emptyAdapter) Name() string            { return a.name }
+func (a *emptyAdapter) Description() string     { return "empty adapter" }
+func (a *emptyAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
+	return nil, nil
+}
+
+// mockDataAdapter returns simple mock data for testing.
+type mockDataAdapter struct {
+	name string
+}
+
+func (a *mockDataAdapter) Name() string             { return a.name }
+func (a *mockDataAdapter) Description() string      { return "mock data adapter" }
+func (a *mockDataAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
+	return []map[string]interface{}{
+		{
+			"ts_code":  "000001.SZ",
+			"vol":      float64(1000),
+			"pct_chg":  float64(2.5),
+			"open":     float64(10.0),
+			"high":     float64(11.0),
+			"low":      float64(9.5),
+			"close":    float64(10.8),
+		},
+		{
+			"ts_code":  "000002.SZ",
+			"vol":      float64(2000),
+			"pct_chg":  float64(-1.2),
+			"open":     float64(30.0),
+			"high":     float64(31.0),
+			"low":      float64(29.5),
+			"close":    float64(29.8),
+		},
+	}, nil
 }

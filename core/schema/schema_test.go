@@ -92,3 +92,32 @@ func TestDailyRecord(t *testing.T) {
 		}
 	}
 }
+
+func TestSchemaWriteModeValues(t *testing.T) {
+	validModes := map[string]bool{
+		"append":              true,
+		"snapshot":            true,
+		"overwrite_partition": true,
+		"replace_range":       true,
+		"upsert_by_key":       true,
+	}
+
+	invalidCount := 0
+	for name, schemaDef := range TableRegistry {
+		if !validModes[schemaDef.WriteMode] {
+			t.Errorf("Schema %s has invalid WriteMode: %s", name, schemaDef.WriteMode)
+			invalidCount++
+		}
+	}
+
+	if invalidCount > 0 {
+		t.Fatalf("%d schemas have invalid WriteMode values", invalidCount)
+	}
+
+	// Count distribution
+	modeCounts := map[string]int{}
+	for _, schemaDef := range TableRegistry {
+		modeCounts[schemaDef.WriteMode]++
+	}
+	t.Logf("Schema WriteMode distribution: %v", modeCounts)
+}

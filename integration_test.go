@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +69,129 @@ func TestIntegration_AdapterToStorage(t *testing.T) {
 	if retrieved.ID != task.ID {
 		t.Errorf("Retrieved task ID: got %s, want %s", retrieved.ID, task.ID)
 	}
+}
+
+func TestIntegration_MockAdapterFullPipeline(t *testing.T) {
+	source.Register(mock.NewMockAdapter())
+
+	tmpDir := "/tmp/test-axdata-integration-fullpipe-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	logger := zap.NewNop()
+
+	collectorInst, err := collector.NewCollector(cfg, store, logger)
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+
+	task, err := collectorInst.AddTask(
+		"mock-daily-pipeline",
+		"mock",
+		"daily",
+		"daily",
+		"core",
+		map[string]interface{}{
+			"codes": "000001.SZ,000002.SZ",
+		},
+	)
+	if err != nil {
+		t.Fatalf("AddTask failed: %v", err)
+	}
+
+	err = collectorInst.UpdateTask(task.ID, map[string]interface{}{
+		"enabled": true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
+	}
+
+	ctx := context.Background()
+	run, err := collectorInst.RunTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	if run.Rows != 0 {
+		t.Logf("Inserted %d rows", run.Rows)
+	}
+
+	// Verify parquet file was created
+	if !store.Exists("core", "daily") {
+		t.Fatal("daily table not found in store")
+	}
+
+	// Query via Querier
+	querier, err := query.NewQuerier()
+	if err != nil {
+		t.Fatalf("NewQuerier failed: %v", err)
+	}
+	defer querier.Close()
+
+	schemaDef := schema.GetSchema("daily")
+	if schemaDef == nil {
+		t.Fatal("daily schema not found")
+	}
+
+	// Create table and attach parquet
+	dbTypes := map[string]string{
+		"float64": "DOUBLE",
+		"int64":   "BIGINT",
+		"int32":   "INTEGER",
+		"string":  "VARCHAR",
+		"bool":    "BOOLEAN",
+	}
+	sqlParts := []string{"CREATE TABLE daily ("}
+	for i, col := range schemaDef.Columns {
+		dbType := dbTypes[col.Type]
+		if dbType == "" {
+			dbType = "VARCHAR"
+		}
+		sqlParts = append(sqlParts, col.Name+" "+dbType)
+		if i < len(schemaDef.Columns)-1 {
+			sqlParts = append(sqlParts, ",")
+		}
+	}
+	sqlParts = append(sqlParts, ")")
+	_, err = querier.Execute(ctx, strings.Join(sqlParts, " "))
+	if err != nil {
+		t.Fatalf("CREATE TABLE failed: %v", err)
+	}
+
+	parquetPath := filepath.Join(tmpDir, "data", "core", "daily.parquet")
+
+	// Create table from parquet
+	parquetSQL := fmt.Sprintf("CREATE TABLE daily_from_parquet AS SELECT * FROM read_parquet('%s')", parquetPath)
+	_, err = querier.Execute(ctx, parquetSQL)
+	if err != nil {
+		t.Fatalf("CREATE TABLE from parquet failed: %v", err)
+	}
+
+	// Count rows
+	countRows, err := querier.Execute(ctx, "SELECT COUNT(*) as cnt FROM daily_from_parquet")
+	if err != nil {
+		t.Fatalf("COUNT query failed: %v", err)
+	}
+	if len(countRows) == 0 || len(countRows[0]) == 0 {
+		t.Fatal("COUNT returned no rows")
+	}
+	cnt := countRows[0][0]
+	var cntInt int64
+	switch v := cnt.(type) {
+	case int64:
+		cntInt = v
+	case int:
+		cntInt = int64(v)
+	case float64:
+		cntInt = int64(v)
+	default:
+		t.Fatalf("Unexpected COUNT type: %T", cnt)
+	}
+	if cntInt < 1 {
+		t.Fatalf("Expected at least 1 row in parquet, got %d", cntInt)
+	}
+	t.Logf("Queried %d rows from parquet daily table", cntInt)
 }
 
 func TestIntegration_ProviderRegistryToSchema(t *testing.T) {
@@ -165,4 +290,51 @@ func TestIntegration_AllSourcesCompile(t *testing.T) {
 	_ = zap.NewNop()
 
 	t.Log("All source adapters instantiated successfully")
+}
+
+func TestIntegration_ProviderRegistryWriteModeConsistency(t *testing.T) {
+	validModes := map[string]bool{
+		"append":              true,
+		"snapshot":            true,
+		"overwrite_partition": true,
+		"replace_range":       true,
+		"upsert_by_key":       true,
+	}
+
+	dualModeExceptions := map[string]bool{
+		"stock_hot_rank":        true,
+		"stock_basic_exchange":  true,
+		"sector_emotion_detail": true,
+		"stock_limit_ladder":    true,
+		"stock_suspension":      true,
+	}
+
+	for name, pi := range source.ProviderRegistry {
+		if pi.WriteMode == "" {
+			t.Errorf("ProviderRegistry %s has empty WriteMode", name)
+			continue
+		}
+		if !validModes[pi.WriteMode] {
+			t.Errorf("ProviderRegistry %s has invalid WriteMode: %s", name, pi.WriteMode)
+			continue
+		}
+
+		schemaDef := schema.GetSchema(pi.Table)
+		if schemaDef == nil {
+			continue
+		}
+		if dualModeExceptions[pi.Table] {
+			continue
+		}
+		if schemaDef.WriteMode != pi.WriteMode && schemaDef.WriteMode != "" {
+			t.Errorf("ProviderRegistry %s WriteMode (%s) != Schema %s WriteMode (%s)",
+				name, pi.WriteMode, pi.Table, schemaDef.WriteMode)
+		}
+	}
+
+	modeCounts := map[string]int{}
+	for _, pi := range source.ProviderRegistry {
+		modeCounts[pi.WriteMode]++
+	}
+	t.Logf("ProviderRegistry WriteMode distribution: %v", modeCounts)
 }

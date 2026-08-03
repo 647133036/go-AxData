@@ -1138,6 +1138,7 @@ func commandFromString(name string) (uint16, error) {
 		"stock_share_capital_tdx": CMD_FILE_CONTENT,
 		"stock_daily_share_tdx":   CMD_FILE_CONTENT,
 		"stock_suspensions_tdx":   CMD_SECURITY_LIST,
+		"stock_codes_tdx":         CMD_SECURITY_LIST,
 		"stock_st_list_tdx":       CMD_SECURITY_LIST,
 		"stock_limit_ladder_tdx":  CMD_CATEGORY_QUOTES,
 		"stock_theme_strength_rank_tdx": CMD_CATEGORY_QUOTES,
