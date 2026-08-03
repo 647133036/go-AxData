@@ -1,0 +1,285 @@
+package storage
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/electkismet/axdata-go/core/config"
+	"github.com/electkismet/axdata-go/core/schema"
+	parquet "github.com/parquet-go/parquet-go"
+)
+
+// Store provides Parquet-based data storage.
+type Store struct {
+	config *config.Config
+}
+
+// NewStore creates a new Store instance.
+func NewStore(cfg *config.Config) *Store {
+	return &Store{config: cfg}
+}
+
+// Record represents a generic record as a map of column values.
+type Record struct {
+	Columns map[string]string
+}
+
+// Write writes records to a Parquet file in the specified layer.
+func (s *Store) Write(layer, table string, records []interface{}) error {
+	dir := s.config.DataDir(layer)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+
+	if len(records) == 0 {
+		return nil
+	}
+
+	schemaDef := schema.TableRegistry[table]
+	if schemaDef == nil {
+		return fmt.Errorf("unknown table: %s", table)
+	}
+
+	// Convert to typed structs based on table type
+	typedRecords := convertRecords(records, table)
+
+	if len(typedRecords) == 0 {
+		return nil
+	}
+
+	// For append-mode tables, use Append (preserves existing data).
+	// For overwrite/snapshot tables, use Write (creates new file).
+	if schemaDef.WriteMode == "append" || schemaDef.WriteMode == "upsert_by_key" {
+		return s.Append(layer, table, typedRecords)
+	}
+
+	// Overwrite mode: write as new file
+	path := filepath.Join(dir, table+".parquet")
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create parquet file: %w", err)
+	}
+
+	// Use parquet-go with typed struct
+	ps := parquet.SchemaOf(typedRecords[0])
+	pw := parquet.NewWriter(f, ps)
+
+	for _, rec := range typedRecords {
+		if err := pw.Write(rec); err != nil {
+			pw.Close()
+			f.Close()
+			return fmt.Errorf("write record: %w", err)
+		}
+	}
+
+	if err := pw.Close(); err != nil {
+		f.Close()
+		return fmt.Errorf("close parquet writer: %w", err)
+	}
+	f.Close()
+
+	// Store row count metadata
+	countPath := path + ".count"
+	os.WriteFile(countPath, []byte(strconv.Itoa(len(typedRecords))), 0644)
+
+	return nil
+}
+
+// convertRecords converts interface records to typed struct pointers.
+func convertRecords(records []interface{}, table string) []interface{} {
+	var typed []interface{}
+
+	for _, rec := range records {
+		switch table {
+		case "daily":
+			m := toMap(rec)
+			typed = append(typed, &schema.DailyRecord{
+				TsCode:    m["ts_code"],
+				TradeDate: m["trade_date"],
+				Open:      parseFloat(m["open"]),
+				High:      parseFloat(m["high"]),
+				Low:       parseFloat(m["low"]),
+				Close:     parseFloat(m["close"]),
+				PreClose:  parseFloat(m["pre_close"]),
+				Change:    parseFloat(m["change"]),
+				PctChg:    parseFloat(m["pct_chg"]),
+				Vol:       parseFloat(m["vol"]),
+				Amount:    parseFloat(m["amount"]),
+			})
+
+		case "adj_factor":
+			m := toMap(rec)
+			typed = append(typed, &schema.AdjFactorRecord{
+				TsCode:    m["ts_code"],
+				TradeDate: m["trade_date"],
+				AdjFactor: parseFloat(m["adj_factor"]),
+			})
+
+		case "trade_cal":
+			m := toMap(rec)
+			var isOpen int64
+			if v, err := strconv.ParseInt(m["is_open"], 10, 64); err == nil {
+				isOpen = v
+			}
+			typed = append(typed, &schema.TradeCalRecord{
+				Exchange:     m["exchange"],
+				CalDate:      m["cal_date"],
+				IsOpen:       isOpen,
+				PretradeDate: m["pretrade_date"],
+			})
+
+		case "stock_basic_exchange":
+			m := toMap(rec)
+			typed = append(typed, &schema.StockBasicRecord{
+				InstrumentID:  m["instrument_id"],
+				Symbol:        m["symbol"],
+				Exchange:      m["exchange"],
+				Name:          m["name"],
+				Market:        m["market"],
+				Region:        m["region"],
+				Industry:      m["industry"],
+				TotalShare:    parseFloat(m["total_share"]),
+				FloatShare:    parseFloat(m["float_share"]),
+				ListDate:      m["list_date"],
+				DelistDate:    m["delist_date"],
+				ListingStatus: m["listing_status"],
+			})
+
+		default:
+			m := toMap(rec)
+			typed = append(typed, &Record{Columns: m})
+		}
+	}
+
+	return typed
+}
+
+// toMap converts a record to a map of column names to string values.
+// Handles nil values by returning empty strings.
+func toMap(rec interface{}) map[string]string {
+	if m, ok := rec.(map[string]interface{}); ok {
+		result := make(map[string]string)
+		for k, v := range m {
+			if v == nil {
+				result[k] = ""
+				continue
+			}
+			result[k] = fmt.Sprintf("%v", v)
+		}
+		return result
+	}
+	return nil
+}
+
+func parseFloat(s string) float64 {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+func parseInt64(s string) int64 {
+	i, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return i
+}
+
+// Count returns the number of records in a table.
+func (s *Store) Count(layer, table string) (int, error) {
+	dir := s.config.DataDir(layer)
+	countPath := filepath.Join(dir, table+".parquet.count")
+
+	data, err := os.ReadFile(countPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("read count metadata: %w", err)
+	}
+
+	return strconv.Atoi(string(data))
+}
+
+// Exists checks if a table exists in the given layer.
+func (s *Store) Exists(layer, table string) bool {
+	dir := s.config.DataDir(layer)
+	_, err := os.Stat(filepath.Join(dir, table+".parquet"))
+	return !os.IsNotExist(err)
+}
+
+// ListTables returns all tables in a given layer.
+func (s *Store) ListTables(layer string) []string {
+	dir := s.config.DataDir(layer)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var tables []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".parquet") {
+			tables = append(tables, strings.TrimSuffix(e.Name(), ".parquet"))
+		}
+	}
+	return tables
+}
+
+// Append writes records to an existing Parquet file.
+func (s *Store) Append(layer string, table string, records []interface{}) error {
+	dir := s.config.DataDir(layer)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create directory: %w", err)
+	}
+
+	if len(records) == 0 {
+		return nil
+	}
+
+	schemaDef := schema.TableRegistry[table]
+	if schemaDef == nil {
+		return fmt.Errorf("unknown table: %s", table)
+	}
+
+	path := filepath.Join(dir, table+".parquet")
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+
+	ps := parquet.SchemaOf(records[0])
+	pw := parquet.NewWriter(f, ps)
+
+	for _, rec := range records {
+		if err := pw.Write(rec); err != nil {
+			pw.Close()
+			f.Close()
+			return fmt.Errorf("write record: %w", err)
+		}
+	}
+
+	if err := pw.Close(); err != nil {
+		f.Close()
+		return fmt.Errorf("close parquet writer: %w", err)
+	}
+	f.Close()
+
+	// Update row count metadata
+	countPath := path + ".count"
+	countData, err := os.ReadFile(countPath)
+	if err == nil {
+		count, parseErr := strconv.Atoi(string(countData))
+		if parseErr == nil {
+			count += len(records)
+			os.WriteFile(countPath, []byte(strconv.Itoa(count)), 0644)
+		}
+	} else {
+		os.WriteFile(countPath, []byte(strconv.Itoa(len(records))), 0644)
+	}
+
+	return nil
+}
