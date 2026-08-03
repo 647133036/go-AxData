@@ -5,6 +5,7 @@
 *.so
 *.dylib
 axdata
+axdata-go
 
 # Data
 axdata_data/
