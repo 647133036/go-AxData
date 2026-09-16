@@ -255,6 +255,55 @@ func TestPearsonClosedForm(t *testing.T) {
 	}
 }
 
+func TestCorrelationMatrixInvariants(t *testing.T) {
+	// These are structural properties of Pearson correlation that hold for
+	// any implementation, so they catch a broken estimator without needing a
+	// known-good baseline to compare against.
+	codes := []string{"A", "B", "C"}
+	series := map[string][]float64{
+		"A": rng(1, 60, 0.001, 0.02),
+		"B": rng(2, 60, 0.001, 0.03),
+		"C": rng(3, 60, 0.001, 0.015),
+	}
+	m := makeCorrelationMatrix(codes, series)
+
+	n := len(codes)
+	for i := 0; i < n; i++ {
+		if math.Abs(m[i][i]-1) > 1e-9 {
+			t.Errorf("diagonal [%d][%d] must be 1, got %f", i, i, m[i][i])
+		}
+		for j := 0; j < n; j++ {
+			if math.Abs(m[i][j]-m[j][i]) > 1e-9 {
+				t.Errorf("not symmetric: [%d][%d]=%f vs [%d][%d]=%f", i, j, m[i][j], j, i, m[j][i])
+			}
+			if m[i][j] < -1-1e-9 || m[i][j] > 1+1e-9 {
+				t.Errorf("out of range [-1,1]: [%d][%d]=%f", i, j, m[i][j])
+			}
+		}
+	}
+}
+
+func TestCorrelationInvariance(t *testing.T) {
+	base := rng(1, 80, 0.001, 0.02)
+	scaled := make([]float64, len(base))
+	for i, v := range base {
+		scaled[i] = 3*v + 5 // positive affine transform
+	}
+	negated := make([]float64, len(base))
+	for i, v := range base {
+		negated[i] = -v
+	}
+	if r := pearson(base, scaled); math.Abs(r-1) > 1e-9 {
+		t.Errorf("correlation must be invariant to a positive affine transform, got %f", r)
+	}
+	if r := pearson(base, negated); math.Abs(r+1) > 1e-9 {
+		t.Errorf("negating one series must flip the sign, got %f", r)
+	}
+	if r := pearson(base, base); math.Abs(r-1) > 1e-9 {
+		t.Errorf("a series must correlate with itself, got %f", r)
+	}
+}
+
 func TestVolatilityPositive(t *testing.T) {
 	if volatility([]float64{1, 1, 1, 1}) != 0 {
 		t.Fatal("constant series must have zero volatility")

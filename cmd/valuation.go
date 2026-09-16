@@ -97,10 +97,10 @@ func (r *RootCmd) runDCF(ctx context.Context, code string, years int, growth, wa
 	}, price)
 	if err != nil {
 		if errors.Is(err, valuation.ErrPriceRequired) {
-			return fmt.Errorf("current price unavailable; pass --price", err)
+			return errors.Join(fmt.Errorf("current price unavailable; pass --price"), err)
 		}
 		if errors.Is(err, valuation.ErrSharesRequired) {
-			return fmt.Errorf("shares outstanding unavailable; pass --shares", err)
+			return errors.Join(fmt.Errorf("shares outstanding unavailable; pass --shares"), err)
 		}
 		return err
 	}

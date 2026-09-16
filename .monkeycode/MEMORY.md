@@ -36,10 +36,11 @@ Entries discovered by the Agent during task execution should follow this format:
 - Context: Discovered by Agent while building and testing the analyst suite
 - Category: Build Methods
 - Instructions:
-  - Full suite is `go test -count=1 ./core/... .` from the repo root; 18 core packages plus the root package.
-  - Build the CLI with `go build -o /tmp/axdata .`; smoke-test against a fresh data root with `--data-root /tmp/axdata_vN` so cache state never masks a bug.
+  - `go test ./...` at the repo root covers only the ROOT module (root pkg + cmd). The 12-module workspace requires listing modules explicitly: `go test -count=1 . ./cmd/... ./core/... ./source-cls/... ./source-cninfo/... ./source-eastmoney/... ./source-kph/... ./source-mock/... ./source-sina/... ./source-tdx/... ./source-tencent/... ./source-ths/... ./source-wencai/...` — 29 packages total.
+  - Build the CLI with `go build -o /tmp/axdata .`; smoke-test against a fresh data root with `--data-root /tmp/axdata_vN` so cache state never masks a bug. Cached data gives different portfolio numbers from a cold fetch, which is expected.
+  - `go test` runs `vet` by default; `fmt.Errorf("literal", err)` with no format directive fails the build. Use `errors.Join(fmt.Errorf("user message"), err)` when the underlying error should be kept.
   - The analysis commands expose `--format-json` as a bool flag. Writing anything to stdout alongside the JSON output breaks piping; status banners belong on stderr.
-  - Flag names were wrong in early smoke tests: `market chart` uses `--bars` (not `--days`), `market watch` uses `--codes` (not `-c`), `portfolio analyze` uses `--weights CODE=PCT`.
+  - Flag names were wrong in early smoke tests: `market chart` uses `--bars` (not `--days`), `market watch` uses `--codes` (not `-c`), `portfolio analyze` uses `--weights CODE=PCT` (there is no `--holdings`).
 
 [Project Knowledge Summary]
 - Date: 2026-09-16
