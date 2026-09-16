@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,19 +11,18 @@ import (
 	"github.com/electkismet/axdata-go/core/collector"
 	"github.com/electkismet/axdata-go/core/config"
 	"github.com/electkismet/axdata-go/core/plugin"
+	"github.com/electkismet/axdata-go/core/plugin/tencent"
 	"github.com/electkismet/axdata-go/core/query"
-	"github.com/electkismet/axdata-go/core/schema"
 	"github.com/electkismet/axdata-go/core/source"
 	"github.com/electkismet/axdata-go/core/storage"
-	"github.com/electkismet/axdata-go/core/plugin/tencent"
-	srcTdx "github.com/electkismet/axdata-source-tdx"
-	srcTencent "github.com/electkismet/axdata-source-tencent"
-	srcCNINFO "github.com/electkismet/axdata-source-cninfo"
-	srcSina "github.com/electkismet/axdata-source-sina"
-	srcEastmoney "github.com/electkismet/axdata-source-eastmoney"
 	srcCls "github.com/electkismet/axdata-source-cls"
+	srcCNINFO "github.com/electkismet/axdata-source-cninfo"
+	srcEastmoney "github.com/electkismet/axdata-source-eastmoney"
 	srcKph "github.com/electkismet/axdata-source-kph"
 	srcMock "github.com/electkismet/axdata-source-mock"
+	srcSina "github.com/electkismet/axdata-source-sina"
+	srcTdx "github.com/electkismet/axdata-source-tdx"
+	srcTencent "github.com/electkismet/axdata-source-tencent"
 	"github.com/electkismet/axdata-source-ths"
 	"github.com/electkismet/axdata-source-wencai"
 	"go.uber.org/zap"
@@ -85,10 +83,6 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-
-	fmt.Printf("AxData Go v2.0.0 - Quantitative Data Platform\n")
-	fmt.Printf("Data root: %s\n", dataRoot)
-	fmt.Printf("Tables available: %d\n", len(schema.TableRegistryNames()))
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		logger.Fatal("execute command", zap.Error(err))

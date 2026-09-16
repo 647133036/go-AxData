@@ -8,9 +8,11 @@ Go 语言版 AxData —— A股量化数据收集与分析平台，兼容 Python
 - **99 个标准接口**：覆盖日线、分钟线、实时行情、板块、题材、龙虎榜、财报等全量数据
 - **63 张表结构定义**：标准化的 Schema Registry，支持 FieldMapping
 - **标准化 ETL 管道**：`Adapter → ProviderRegistry → FieldMapping → Schema → DuckDB/Parquet`
+- **5 个分析模块**：行情图表、基本面、业绩预告、DCF 估值、组合分析，全部支持 JSON 输出
+- **本地优先缓存**：Parquet 优先、源回源、全源失败时降级到陈旧数据，快照表跨标的隔离
 - **零外部 TDX SDK 依赖**：纯 Go TCP 协议实现通达信 7709 接口
 - **Go workspace 多模块**：每个数据源独立模块，核心模块统一维护
-- **完整测试覆盖**：19 个包，160+ 测试函数，全部通过
+- **完整测试覆盖**：core 18 个包 + 11 个数据源模块，247 个测试函数，全部通过
 
 ## 架构
 
@@ -56,7 +58,7 @@ Go 1.24+
   --params '{"codes":"000001.SZ,000002.SZ","period":"daily"}'
 
 # 启动 API 服务
-./axdata-go api serve --port 8080
+./axdata-go api --port 8080
 ```
 
 ## 数据源
@@ -123,6 +125,46 @@ type Adapter interface {
 curl "http://localhost:8080/api/query?sql=SELECT * FROM daily LIMIT 10"
 ```
 
+## 分析命令
+
+在原始数据之上提供 5 个分析模块，全部支持 `--format-json` 输出机器可读结果（写入 stdout；状态横幅写入 stderr，管道不受污染）。
+
+| 命令 | 说明 |
+|------|------|
+| `market quote CODE` | 实时行情快照：最新价、涨跌幅、换手率、量比、PE/PB、市值 |
+| `market watch --codes A,B,C` | 多标的横向对比，按涨跌幅排序，可筛选板块/市值 |
+| `market chart CODE` | 本地 K 线 + MA5/10/20 + RSI(14) + MACD 的 ASCII 图表，可导出 SVG |
+| `fundamental profile CODE` | 财务报表指标、主营构成（按维度分解）、估值快照、ROE 与盈利质量 |
+| `earnings report CODE` | 业绩预告与预告后实际业绩对比：变动幅度、是否超预期及原因说明 |
+| `valuation dcf CODE` | 两阶段 DCF：内在价值、安全边际、WACC/终值增长率敏感性矩阵 |
+| `portfolio analyze` | 组合波动率分解、风险贡献占比、HHI 集中度、相关性矩阵 |
+
+```bash
+# 单只股票基本面
+./axdata-go fundamental profile 600519.SH
+
+# K 线图（60 根 K 线，宽 130 列）
+./axdata-go market chart 600519.SH --bars 60 --width 130 --svg chart.svg
+
+# 业绩预告
+./axdata-go earnings report 600519.SH
+
+# DCF 估值（自定义 WACC 与永续增长率）
+./axdata-go valuation dcf 600519.SH --wacc 0.08 --terminal-growth 0.02
+
+# 组合分析（等权，或指定权重）
+./axdata-go portfolio analyze --weights 600519.SH=50,000858.SZ=30,000001.SZ=20
+
+# 机器可读输出
+./axdata-go valuation dcf 600519.SH --format-json
+```
+
+### 本地优先缓存
+
+分析命令的数据读取统一走 `core/cache`，顺序为：本地 Parquet → 数据源抓取 → 写回缓存。全部数据源失败时返回本地陈旧数据并标注，避免分析能力因网络问题完全不可用。
+
+快照类表（财务三表、主营构成、业绩预告、估值快照）会跨标的共享同一个文件，读取时按 `ts_code` 过滤，写回时合并其他标的的行，保证多标的缓存互不覆盖。
+
 ## 输出格式
 
 | 格式 | 路径 | 说明 |
@@ -153,7 +195,7 @@ go test -v -count=1 ./source-tencent/...
 go test -v -count=1 -run TestIntegration .
 ```
 
-当前 19 个包，160+ 测试函数，全部通过。
+当前 core 18 个包 + 11 个数据源模块，247 个测试函数，全部通过。
 
 ## 开发
 
@@ -191,13 +233,21 @@ source.Register(mysource.NewMySourceAdapter())
 ├── cmd/                 # CLI 命令
 ├── core/                # 核心模块
 │   ├── api/             # API 服务
+│   ├── cache/           # 本地优先缓存（含跨标的快照隔离）
+│   ├── chart/           # ASCII / SVG 图表渲染
 │   ├── collector/       # 采集任务系统
 │   ├── config/          # 配置管理
+│   ├── earnings/        # 业绩预告与业绩对比
+│   ├── fundamental/     # 财务指标与主营构成
+│   ├── indicator/       # 技术指标（MA/RSI/MACD）
+│   ├── market/          # 行情、K 线、图表数据
+│   ├── portfolio/       # 组合波动率与集中度
 │   ├── plugin/          # 插件系统
 │   ├── query/           # DuckDB 查询器
 │   ├── schema/          # 表结构定义（63 张表）
 │   ├── source/          # Provider 注册表（99 个接口）
-│   └── storage/         # Parquet 存储
+│   ├── storage/         # Parquet 存储
+│   └── valuation/       # DCF 估值模型
 ├── source-*/            # 10 个数据源适配器（独立 Go module）
 ├── integration_test.go  # 集成测试
 └── go.work              # Go workspace

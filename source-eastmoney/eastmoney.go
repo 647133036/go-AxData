@@ -56,25 +56,31 @@ var (
 		"8218": "60日大幅下跌",
 	}
 	supportedInterfaces = map[string]bool{
-		"eastmoney_market_index_realtime":        true,
-		"eastmoney_market_index_all_em":          true,
-		"eastmoney_stocks_all_em":                true,
-		"eastmoney_stock_realtime_snapshot":      true,
-		"eastmoney_sector_realtime":              true,
-		"eastmoney_sector_constituents":          true,
-		"eastmoney_stock_sector_belong":          true,
-		"eastmoney_limit_up_pool":                true,
-		"eastmoney_limit_down_pool":              true,
-		"eastmoney_yesterday_limit_up_pool":      true,
-		"eastmoney_stock_changes":                true,
-		"eastmoney_stock_change_detail":          true,
-		"eastmoney_dragon_tiger_daily":           true,
-		"eastmoney_margin_trading":               true,
-		"eastmoney_research_reports":             true,
-		"eastmoney_is_trade_day":                 true,
-		"eastmoney_trade_days":                   true,
-		"is_trade_day":                           true,
-		"get_trade_days":                         true,
+		"eastmoney_market_index_realtime":   true,
+		"eastmoney_market_index_all_em":     true,
+		"eastmoney_stocks_all_em":           true,
+		"eastmoney_stock_realtime_snapshot": true,
+		"eastmoney_sector_realtime":         true,
+		"eastmoney_sector_constituents":     true,
+		"eastmoney_stock_sector_belong":     true,
+		"eastmoney_limit_up_pool":           true,
+		"eastmoney_limit_down_pool":         true,
+		"eastmoney_yesterday_limit_up_pool": true,
+		"eastmoney_stock_changes":           true,
+		"eastmoney_stock_change_detail":     true,
+		"eastmoney_dragon_tiger_daily":      true,
+		"eastmoney_margin_trading":          true,
+		"eastmoney_research_reports":        true,
+		"eastmoney_is_trade_day":            true,
+		"eastmoney_trade_days":              true,
+		"eastmoney_financial_income":        true,
+		"eastmoney_financial_balance":       true,
+		"eastmoney_financial_cashflow":      true,
+		"eastmoney_business_scope":          true,
+		"eastmoney_earnings_forecast":       true,
+		"eastmoney_valuation_snapshot":      true,
+		"is_trade_day":                      true,
+		"get_trade_days":                    true,
 	}
 )
 
@@ -105,7 +111,7 @@ func (a *EastMoneyAdapter) Request(ctx context.Context, params map[string]interf
 		return nil, fmt.Errorf("unknown interface: %s", interfaceName)
 	}
 
-  switch interfaceName {
+	switch interfaceName {
 	case "eastmoney_market_index_realtime":
 		return a.requestMarketIndexRealtime(ctx, params)
 	case "eastmoney_market_index_all_em":
@@ -136,6 +142,18 @@ func (a *EastMoneyAdapter) Request(ctx context.Context, params map[string]interf
 		return a.requestMarginTrading(ctx, params)
 	case "eastmoney_research_reports":
 		return a.requestResearchReports(ctx, params)
+	case "eastmoney_financial_income":
+		return a.requestFinancialReport(ctx, params, "income")
+	case "eastmoney_financial_balance":
+		return a.requestFinancialReport(ctx, params, "balance")
+	case "eastmoney_financial_cashflow":
+		return a.requestFinancialReport(ctx, params, "cashflow")
+	case "eastmoney_business_scope":
+		return a.requestBusinessScope(ctx, params)
+	case "eastmoney_earnings_forecast":
+		return a.requestEarningsForecast(ctx, params)
+	case "eastmoney_valuation_snapshot":
+		return a.requestValuationSnapshot(ctx, params)
 	case "eastmoney_is_trade_day", "is_trade_day":
 		return a.requestIsTradeDay(ctx, params)
 	case "eastmoney_trade_days", "get_trade_days":
@@ -299,7 +317,7 @@ func buildQueryURL(baseURL string, params map[string]string) string {
 // payloadDiffRows extracts rows from push2delay response format {data: {diff: [...], ...}}.
 func payloadDiffRows(data []byte) ([]map[string]interface{}, error) {
 	var raw struct {
-		Rc  interface{} `json:"rc"`
+		Rc   interface{} `json:"rc"`
 		Data struct {
 			Diff []map[string]interface{} `json:"diff"`
 		} `json:"data"`
@@ -499,15 +517,15 @@ func (a *EastMoneyAdapter) requestStocksAllEm(ctx context.Context, params map[st
 	}
 
 	paramsMap := map[string]string{
-		"pn":   strconv.Itoa(page),
-		"pz":   strconv.Itoa(limit),
-		"po":   "1",
-		"np":   "1",
-		"ut":   "bd1d9ddb04089700cf9c27f6f7426281",
-		"fltt": "2",
-		"invt": "2",
-		"fid":  "f3",
-		"fs":   "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
+		"pn":     strconv.Itoa(page),
+		"pz":     strconv.Itoa(limit),
+		"po":     "1",
+		"np":     "1",
+		"ut":     "bd1d9ddb04089700cf9c27f6f7426281",
+		"fltt":   "2",
+		"invt":   "2",
+		"fid":    "f3",
+		"fs":     "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
 		"fields": "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23",
 	}
 
@@ -533,25 +551,25 @@ func (a *EastMoneyAdapter) requestStocksAllEm(ctx context.Context, params map[st
 			continue
 		}
 		normalized = append(normalized, map[string]interface{}{
-			"instrument_id":     instrumentID(symbol),
-			"symbol":            symbol,
-			"exchange":          exchangeFromSymbol(symbol),
-			"name":              name,
-			"last_price":        floatVal(row["f2"]),
-			"change_pct":        floatVal(row["f3"]),
-			"change":            floatVal(row["f4"]),
-			"volume":            floatVal(row["f5"]),
-			"amount":            floatVal(row["f6"]),
-			"turnover_rate":     floatVal(row["f8"]),
-			"pe_ttm":            floatVal(row["f9"]),
-			"volume_ratio":      floatVal(row["f10"]),
-			"high":              floatVal(row["f15"]),
-			"low":               floatVal(row["f16"]),
-			"open":              floatVal(row["f17"]),
-			"pre_close":         floatVal(row["f18"]),
-			"total_market":      floatVal(row["f20"]),
-			"circ_market":       floatVal(row["f21"]),
-			"pb":                floatVal(row["f23"]),
+			"instrument_id": instrumentID(symbol),
+			"symbol":        symbol,
+			"exchange":      exchangeFromSymbol(symbol),
+			"name":          name,
+			"last_price":    floatVal(row["f2"]),
+			"change_pct":    floatVal(row["f3"]),
+			"change":        floatVal(row["f4"]),
+			"volume":        floatVal(row["f5"]),
+			"amount":        floatVal(row["f6"]),
+			"turnover_rate": floatVal(row["f8"]),
+			"pe_ttm":        floatVal(row["f9"]),
+			"volume_ratio":  floatVal(row["f10"]),
+			"high":          floatVal(row["f15"]),
+			"low":           floatVal(row["f16"]),
+			"open":          floatVal(row["f17"]),
+			"pre_close":     floatVal(row["f18"]),
+			"total_market":  floatVal(row["f20"]),
+			"circ_market":   floatVal(row["f21"]),
+			"pb":            floatVal(row["f23"]),
 		})
 	}
 
@@ -648,16 +666,16 @@ func (a *EastMoneyAdapter) requestMarketIndexRealtime(ctx context.Context, param
 	}
 
 	paramsMap := map[string]string{
-		"np":   "1",
-		"fltt": "1",
-		"invt": "2",
-		"fs":   "b:MK0010",
+		"np":     "1",
+		"fltt":   "1",
+		"invt":   "2",
+		"fs":     "b:MK0010",
 		"fields": "f12,f14,f2,f3,f4,f5,f6,f15,f16,f17,f18",
-		"pn":   "1",
-		"pz":   strconv.Itoa(limit),
-		"po":   "1",
-		"ut":   "fa5fd1943c7b386f172d6893dbfba10b",
-		"dect": "1",
+		"pn":     "1",
+		"pz":     strconv.Itoa(limit),
+		"po":     "1",
+		"ut":     "fa5fd1943c7b386f172d6893dbfba10b",
+		"dect":   "1",
 	}
 
 	data, err := a.httpGet(ctx, buildQueryURL(EASTMONEY_CLIST_URL, paramsMap), "https://quote.eastmoney.com/")
@@ -673,17 +691,17 @@ func (a *EastMoneyAdapter) requestMarketIndexRealtime(ctx context.Context, param
 	var normalized []map[string]interface{}
 	for _, row := range rows {
 		normalized = append(normalized, map[string]interface{}{
-			"index_code":   cleanText(row["f12"]),
-			"index_name":   cleanText(row["f14"]),
-			"last_price":   floatVal(row["f2"]) / 100,
-			"change_pct":   floatVal(row["f3"]) / 100,
-			"change":       floatVal(row["f4"]) / 100,
-			"volume":       floatVal(row["f5"]),
-			"amount":       floatVal(row["f6"]),
-			"high":         floatVal(row["f15"]) / 100,
-			"low":          floatVal(row["f16"]) / 100,
-			"open":         floatVal(row["f17"]) / 100,
-			"pre_close":    floatVal(row["f18"]) / 100,
+			"index_code": cleanText(row["f12"]),
+			"index_name": cleanText(row["f14"]),
+			"last_price": floatVal(row["f2"]) / 100,
+			"change_pct": floatVal(row["f3"]) / 100,
+			"change":     floatVal(row["f4"]) / 100,
+			"volume":     floatVal(row["f5"]),
+			"amount":     floatVal(row["f6"]),
+			"high":       floatVal(row["f15"]) / 100,
+			"low":        floatVal(row["f16"]) / 100,
+			"open":       floatVal(row["f17"]) / 100,
+			"pre_close":  floatVal(row["f18"]) / 100,
 		})
 	}
 
@@ -744,15 +762,15 @@ func (a *EastMoneyAdapter) requestStockRealtimeSnapshot(ctx context.Context, par
 			limit = 200
 		}
 		paramsMap := map[string]string{
-			"pn":   strconv.Itoa(page),
-			"pz":   strconv.Itoa(limit),
-			"po":   "1",
-			"np":   "1",
-			"ut":   "bd1d9ddb04089700cf9c27f6f7426281",
-			"fltt": "2",
-			"invt": "2",
-			"fid":  "f3",
-			"fs":   "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
+			"pn":     strconv.Itoa(page),
+			"pz":     strconv.Itoa(limit),
+			"po":     "1",
+			"np":     "1",
+			"ut":     "bd1d9ddb04089700cf9c27f6f7426281",
+			"fltt":   "2",
+			"invt":   "2",
+			"fid":    "f3",
+			"fs":     "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
 			"fields": "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23",
 		}
 		data, err := a.httpGet(ctx, buildQueryURL(EASTMONEY_CLIST_URL, paramsMap), "https://quote.eastmoney.com/")
@@ -825,15 +843,15 @@ func (a *EastMoneyAdapter) requestSectorRealtime(ctx context.Context, params map
 	}
 
 	paramsMap := map[string]string{
-		"pn":   strconv.Itoa(page),
-		"pz":   strconv.Itoa(limit),
-		"po":   "1",
-		"np":   "1",
-		"ut":   "bd1d9ddb04089700cf9c27f6f7426281",
-		"fltt": "2",
-		"invt": "2",
-		"fid":  "f3",
-		"fs":   fs,
+		"pn":     strconv.Itoa(page),
+		"pz":     strconv.Itoa(limit),
+		"po":     "1",
+		"np":     "1",
+		"ut":     "bd1d9ddb04089700cf9c27f6f7426281",
+		"fltt":   "2",
+		"invt":   "2",
+		"fid":    "f3",
+		"fs":     fs,
 		"fields": "f12,f14,f2,f3,f4,f5,f6,f7,f8,f20,f62,f128,f136,f140,f104,f105",
 	}
 
@@ -851,23 +869,23 @@ func (a *EastMoneyAdapter) requestSectorRealtime(ctx context.Context, params map
 	for _, row := range rows {
 		leadSymbol := cleanText(row["f140"])
 		normalized = append(normalized, map[string]interface{}{
-			"sector_code":          cleanText(row["f12"]),
-			"sector_name":          cleanText(row["f14"]),
-			"sector_type":          sectorType,
-			"last_price":           floatVal(row["f2"]),
-			"change_pct":           floatVal(row["f3"]),
-			"change":               floatVal(row["f4"]),
-			"volume":               floatVal(row["f5"]),
-			"amount":               floatVal(row["f6"]),
-			"amplitude":            floatVal(row["f7"]),
-			"turnover_rate":        floatVal(row["f8"]),
-			"total_market_value":   floatVal(row["f20"]),
-			"main_inflow":          floatVal(row["f62"]),
-			"lead_stock_name":      cleanText(row["f128"]),
-			"lead_stock_symbol":    leadSymbol,
+			"sector_code":           cleanText(row["f12"]),
+			"sector_name":           cleanText(row["f14"]),
+			"sector_type":           sectorType,
+			"last_price":            floatVal(row["f2"]),
+			"change_pct":            floatVal(row["f3"]),
+			"change":                floatVal(row["f4"]),
+			"volume":                floatVal(row["f5"]),
+			"amount":                floatVal(row["f6"]),
+			"amplitude":             floatVal(row["f7"]),
+			"turnover_rate":         floatVal(row["f8"]),
+			"total_market_value":    floatVal(row["f20"]),
+			"main_inflow":           floatVal(row["f62"]),
+			"lead_stock_name":       cleanText(row["f128"]),
+			"lead_stock_symbol":     leadSymbol,
 			"lead_stock_change_pct": floatVal(row["f136"]),
-			"up_count":             int(floatVal(row["f104"])),
-			"down_count":           int(floatVal(row["f105"])),
+			"up_count":              int(floatVal(row["f104"])),
+			"down_count":            int(floatVal(row["f105"])),
 		})
 	}
 
@@ -887,15 +905,15 @@ func (a *EastMoneyAdapter) requestSectorConstituents(ctx context.Context, params
 	}
 
 	paramsMap := map[string]string{
-		"pn":   strconv.Itoa(page),
-		"pz":   strconv.Itoa(limit),
-		"po":   "1",
-		"np":   "1",
-		"ut":   "bd1d9ddb04089700cf9c27f6f7426281",
-		"fltt": "2",
-		"invt": "2",
-		"fid":  "f3",
-		"fs":   "b:" + sectorCode + "+f:!50",
+		"pn":     strconv.Itoa(page),
+		"pz":     strconv.Itoa(limit),
+		"po":     "1",
+		"np":     "1",
+		"ut":     "bd1d9ddb04089700cf9c27f6f7426281",
+		"fltt":   "2",
+		"invt":   "2",
+		"fid":    "f3",
+		"fs":     "b:" + sectorCode + "+f:!50",
 		"fields": "f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f14,f15,f16,f17,f18,f20,f21,f23",
 	}
 
@@ -917,26 +935,26 @@ func (a *EastMoneyAdapter) requestSectorConstituents(ctx context.Context, params
 		}
 		exchange := exchangeFromSymbol(symbol)
 		normalized = append(normalized, map[string]interface{}{
-			"instrument_id":     instrumentID(symbol),
-			"symbol":            symbol,
-			"exchange":          exchange,
-			"name":              cleanText(row["f14"]),
-			"last_price":        floatVal(row["f2"]),
-			"change_pct":        floatVal(row["f3"]),
-			"change":            floatVal(row["f4"]),
-			"volume":            floatVal(row["f5"]),
-			"amount":            floatVal(row["f6"]),
-			"amplitude":         floatVal(row["f7"]),
-			"turnover_rate":     floatVal(row["f8"]),
-			"pe_ttm":            floatVal(row["f9"]),
-			"volume_ratio":      floatVal(row["f10"]),
-			"high":              floatVal(row["f15"]),
-			"low":               floatVal(row["f16"]),
-			"open":              floatVal(row["f17"]),
-			"pre_close":         floatVal(row["f18"]),
+			"instrument_id":      instrumentID(symbol),
+			"symbol":             symbol,
+			"exchange":           exchange,
+			"name":               cleanText(row["f14"]),
+			"last_price":         floatVal(row["f2"]),
+			"change_pct":         floatVal(row["f3"]),
+			"change":             floatVal(row["f4"]),
+			"volume":             floatVal(row["f5"]),
+			"amount":             floatVal(row["f6"]),
+			"amplitude":          floatVal(row["f7"]),
+			"turnover_rate":      floatVal(row["f8"]),
+			"pe_ttm":             floatVal(row["f9"]),
+			"volume_ratio":       floatVal(row["f10"]),
+			"high":               floatVal(row["f15"]),
+			"low":                floatVal(row["f16"]),
+			"open":               floatVal(row["f17"]),
+			"pre_close":          floatVal(row["f18"]),
 			"total_market_value": floatVal(row["f20"]),
 			"float_market_value": floatVal(row["f21"]),
-			"pb":                floatVal(row["f23"]),
+			"pb":                 floatVal(row["f23"]),
 		})
 	}
 
@@ -1011,12 +1029,12 @@ func (a *EastMoneyAdapter) requestLimitPool(ctx context.Context, params map[stri
 	}
 
 	paramsMap := map[string]string{
-		"ut":       "7eea3edcaed734bea9cbfc24409ed989",
-		"dpt":      "wz.ztzt",
+		"ut":        "7eea3edcaed734bea9cbfc24409ed989",
+		"dpt":       "wz.ztzt",
 		"Pageindex": "0",
-		"pagesize": "3000",
-		"sort":     sort,
-		"date":     tradeDate,
+		"pagesize":  "3000",
+		"sort":      sort,
+		"date":      tradeDate,
 	}
 
 	data, err := a.httpGet(ctx, buildQueryURL(url, paramsMap), "https://quote.eastmoney.com/")
@@ -1050,26 +1068,26 @@ func (a *EastMoneyAdapter) requestLimitPool(ctx context.Context, params map[stri
 		}
 
 		normalized = append(normalized, map[string]interface{}{
-			"trade_date":           tradeDate,
-			"instrument_id":        iid,
-			"symbol":               sym,
-			"exchange":             exchange,
-			"name":                 cleanText(row["n"]),
-			"market_code":          marketCode,
-			"last_price":           floatVal(row["p"]) / 1000,
-			"limit_price":          limitPrice,
-			"change_pct":           floatVal(row["zdp"]),
-			"amount":               floatVal(row["amount"]),
-			"float_market_value":   floatVal(row["ltsz"]),
-			"turnover_rate":        floatVal(row["hs"]),
-			"first_limit_time":     formatTime(row["fbt"]),
-			"last_limit_time":      formatTime(row["lbt"]),
-			"continuous_count":     int(floatVal(row["lbc"])),
-			"open_times":           int(floatVal(row["zbc"])),
-			"main_inflow":          floatVal(row["fund"]),
-			"sector":               cleanText(row["hybk"]),
-			"zt_days":              int(floatVal(zttj["days"])),
-			"zt_count":             int(floatVal(zttj["ct"])),
+			"trade_date":         tradeDate,
+			"instrument_id":      iid,
+			"symbol":             sym,
+			"exchange":           exchange,
+			"name":               cleanText(row["n"]),
+			"market_code":        marketCode,
+			"last_price":         floatVal(row["p"]) / 1000,
+			"limit_price":        limitPrice,
+			"change_pct":         floatVal(row["zdp"]),
+			"amount":             floatVal(row["amount"]),
+			"float_market_value": floatVal(row["ltsz"]),
+			"turnover_rate":      floatVal(row["hs"]),
+			"first_limit_time":   formatTime(row["fbt"]),
+			"last_limit_time":    formatTime(row["lbt"]),
+			"continuous_count":   int(floatVal(row["lbc"])),
+			"open_times":         int(floatVal(row["zbc"])),
+			"main_inflow":        floatVal(row["fund"]),
+			"sector":             cleanText(row["hybk"]),
+			"zt_days":            int(floatVal(zttj["days"])),
+			"zt_count":           int(floatVal(zttj["ct"])),
 		})
 	}
 
@@ -1084,12 +1102,12 @@ func (a *EastMoneyAdapter) requestYesterdayLimitUpPool(ctx context.Context, para
 	}
 
 	paramsMap := map[string]string{
-		"ut":       "7eea3edcaed734bea9cbfc24409ed989",
-		"dpt":      "wz.ztzt",
+		"ut":        "7eea3edcaed734bea9cbfc24409ed989",
+		"dpt":       "wz.ztzt",
 		"Pageindex": "0",
-		"pagesize": "3000",
-		"sort":     "zs:desc",
-		"date":     tradeDate,
+		"pagesize":  "3000",
+		"sort":      "zs:desc",
+		"date":      tradeDate,
 	}
 
 	data, err := a.httpGet(ctx, buildQueryURL(EASTMONEY_YESTERDAY_ZT_URL, paramsMap), "https://quote.eastmoney.com/")
@@ -1110,27 +1128,27 @@ func (a *EastMoneyAdapter) requestYesterdayLimitUpPool(ctx context.Context, para
 		sym, exchange := splitInstrumentID(iid)
 
 		normalized = append(normalized, map[string]interface{}{
-			"trade_date":                tradeDate,
-			"instrument_id":             iid,
-			"symbol":                    sym,
-			"exchange":                  exchange,
-			"name":                      cleanText(row["n"]),
-			"market_code":               marketCode,
-			"last_price":                floatVal(row["p"]) / 1000,
-			"limit_price":               floatVal(row["ztp"]) / 1000,
-			"change_pct":                floatVal(row["zdp"]),
-			"amount":                    floatVal(row["amount"]),
-			"float_market_value":        floatVal(row["ltsz"]),
-			"turnover_rate":             floatVal(row["hs"]),
-			"first_limit_time":          formatTime(row["fbt"]),
-			"last_limit_time":           formatTime(row["lbt"]),
-			"continuous_count":          int(floatVal(row["lbc"])),
-			"open_times":                int(floatVal(row["zbc"])),
-			"main_inflow":               floatVal(row["fund"]),
-			"sector":                    cleanText(row["hybk"]),
-			"amplitude":                 floatVal(row["zf"]),
-			"open_ratio":                floatVal(row["zs"]),
-			"yesterday_limit_time":      formatTime(row["yfbt"]),
+			"trade_date":                 tradeDate,
+			"instrument_id":              iid,
+			"symbol":                     sym,
+			"exchange":                   exchange,
+			"name":                       cleanText(row["n"]),
+			"market_code":                marketCode,
+			"last_price":                 floatVal(row["p"]) / 1000,
+			"limit_price":                floatVal(row["ztp"]) / 1000,
+			"change_pct":                 floatVal(row["zdp"]),
+			"amount":                     floatVal(row["amount"]),
+			"float_market_value":         floatVal(row["ltsz"]),
+			"turnover_rate":              floatVal(row["hs"]),
+			"first_limit_time":           formatTime(row["fbt"]),
+			"last_limit_time":            formatTime(row["lbt"]),
+			"continuous_count":           int(floatVal(row["lbc"])),
+			"open_times":                 int(floatVal(row["zbc"])),
+			"main_inflow":                floatVal(row["fund"]),
+			"sector":                     cleanText(row["hybk"]),
+			"amplitude":                  floatVal(row["zf"]),
+			"open_ratio":                 floatVal(row["zs"]),
+			"yesterday_limit_time":       formatTime(row["yfbt"]),
 			"yesterday_continuous_count": int(floatVal(row["ylbc"])),
 		})
 	}
@@ -1148,11 +1166,11 @@ func (a *EastMoneyAdapter) requestStockChanges(ctx context.Context, params map[s
 	filterST := parseBool(params, "filter_st", true)
 
 	paramsMap := map[string]string{
-		"type":     changeType,
-		"ut":       "7eea3edcaed734bea9cbfc24409ed989",
+		"type":      changeType,
+		"ut":        "7eea3edcaed734bea9cbfc24409ed989",
 		"pageindex": "0",
-		"pagesize": "10000",
-		"dpt":      "wzchanges",
+		"pagesize":  "10000",
+		"dpt":       "wzchanges",
 	}
 
 	data, err := a.httpGet(ctx, buildQueryURL(EASTMONEY_STOCK_CHANGES_URL, paramsMap), "https://quote.eastmoney.com/")
@@ -1181,14 +1199,14 @@ func (a *EastMoneyAdapter) requestStockChanges(ctx context.Context, params map[s
 			}
 		}
 		normalized = append(normalized, map[string]interface{}{
-			"instrument_id":   iid,
-			"symbol":          sym,
-			"exchange":        exchange,
-			"name":            name,
-			"market_code":     marketCode,
-			"change_time":     formatTime(row["tm"]),
-			"change_pct":      floatVal(row["i"]),
-			"change_type":     changeType,
+			"instrument_id":    iid,
+			"symbol":           sym,
+			"exchange":         exchange,
+			"name":             name,
+			"market_code":      marketCode,
+			"change_time":      formatTime(row["tm"]),
+			"change_pct":       floatVal(row["i"]),
+			"change_type":      changeType,
 			"change_type_name": changeTypeNames[changeType],
 		})
 	}
@@ -1444,18 +1462,18 @@ func (a *EastMoneyAdapter) requestResearchReports(ctx context.Context, params ma
 	}
 
 	paramsMap := map[string]string{
-		"pageNo":        strconv.Itoa(page),
-		"pageSize":      strconv.Itoa(limit),
-		"code":          symbol,
-		"industryCode":  "*",
-		"industry":      "*",
-		"rating":        "",
-		"ratingChange":  "",
-		"beginTime":     dateToDash(startDate),
-		"endTime":       dateToDash(endDate),
-		"qType":         "0",
-		"orgCode":       "",
-		"rcode":         "",
+		"pageNo":       strconv.Itoa(page),
+		"pageSize":     strconv.Itoa(limit),
+		"code":         symbol,
+		"industryCode": "*",
+		"industry":     "*",
+		"rating":       "",
+		"ratingChange": "",
+		"beginTime":    dateToDash(startDate),
+		"endTime":      dateToDash(endDate),
+		"qType":        "0",
+		"orgCode":      "",
+		"rcode":        "",
 	}
 
 	data, err := a.httpGet(ctx, buildQueryURL(EASTMONEY_REPORT_LIST_URL, paramsMap),
@@ -1475,21 +1493,21 @@ func (a *EastMoneyAdapter) requestResearchReports(ctx context.Context, params ma
 		_, exchange := splitInstrumentID(iid)
 		ratingChange := cleanText(row["ratingChange"])
 		normalized = append(normalized, map[string]interface{}{
-			"report_id":                cleanText(row["infoCode"]),
-			"instrument_id":            iid,
-			"symbol":                   symbol,
-			"exchange":                 exchange,
-			"name":                     cleanText(row["stockName"]),
-			"title":                    cleanText(row["title"]),
-			"publish_date":             dateFromValue(row["publishDate"]),
-			"org_name":                 cleanText(row["orgName"]),
-			"rating":                   cleanText(row["emRatingName"]),
-			"rating_change":            ratingChange,
-			"researcher":               cleanText(row["researcher"]),
-			"eps_forecast_this_year":   floatVal(row["predictThisYearEps"]),
-			"pe_forecast_this_year":    floatVal(row["predictThisYearPe"]),
-			"file_size_kb":             floatVal(row["attachSize"]),
-			"page_count":               int(floatVal(row["attachPages"])),
+			"report_id":              cleanText(row["infoCode"]),
+			"instrument_id":          iid,
+			"symbol":                 symbol,
+			"exchange":               exchange,
+			"name":                   cleanText(row["stockName"]),
+			"title":                  cleanText(row["title"]),
+			"publish_date":           dateFromValue(row["publishDate"]),
+			"org_name":               cleanText(row["orgName"]),
+			"rating":                 cleanText(row["emRatingName"]),
+			"rating_change":          ratingChange,
+			"researcher":             cleanText(row["researcher"]),
+			"eps_forecast_this_year": floatVal(row["predictThisYearEps"]),
+			"pe_forecast_this_year":  floatVal(row["predictThisYearPe"]),
+			"file_size_kb":           floatVal(row["attachSize"]),
+			"page_count":             int(floatVal(row["attachPages"])),
 		})
 	}
 

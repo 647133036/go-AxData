@@ -61,6 +61,35 @@ func (q *Querier) Execute(ctx context.Context, sql string, params ...interface{}
 	return results, rows.Err()
 }
 
+// ExecuteWithColumns runs SQL and returns rows together with their column
+// names, so callers can address values by name.
+func (q *Querier) ExecuteWithColumns(ctx context.Context, sql string, params ...interface{}) ([][]interface{}, []string, error) {
+	rows, err := q.conn.QueryContext(ctx, sql, params...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("execute: %w", err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get columns: %w", err)
+	}
+
+	var results [][]interface{}
+	for rows.Next() {
+		vals := make([]interface{}, len(columns))
+		valPtrs := make([]interface{}, len(columns))
+		for i := range vals {
+			valPtrs[i] = &vals[i]
+		}
+		if err := rows.Scan(valPtrs...); err != nil {
+			return nil, nil, fmt.Errorf("scan row: %w", err)
+		}
+		results = append(results, vals)
+	}
+	return results, columns, rows.Err()
+}
+
 // AttachParquet attaches a Parquet file as a DuckDB table.
 func (q *Querier) AttachParquet(ctx context.Context, table string, path string) error {
 	_, err := q.conn.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s AS SELECT * FROM read_parquet('%s')", table, path))

@@ -20,10 +20,10 @@ type Config struct {
 	APIPort int `mapstructure:"api_port"`
 	// DataLayers defines the data layer directories.
 	DataLayers struct {
-		Raw      string `mapstructure:"raw"`
-		Staging  string `mapstructure:"staging"`
-		Core     string `mapstructure:"core"`
-		Factor   string `mapstructure:"factor"`
+		Raw     string `mapstructure:"raw"`
+		Staging string `mapstructure:"staging"`
+		Core    string `mapstructure:"core"`
+		Factor  string `mapstructure:"factor"`
 	} `mapstructure:"data_layers"`
 	// Storage config.
 	Storage struct {
@@ -32,11 +32,11 @@ type Config struct {
 	} `mapstructure:"storage"`
 	// Collector config.
 	Collector struct {
-		MaxConcurrentTasks int           `mapstructure:"max_concurrent_tasks"`
-		BatchSize          int           `mapstructure:"batch_size"`
-		RequestIntervalMs  int           `mapstructure:"request_interval_ms"`
-		RetryCount         int           `mapstructure:"retry_count"`
-		TimeoutMs          int           `mapstructure:"timeout_ms"`
+		MaxConcurrentTasks int `mapstructure:"max_concurrent_tasks"`
+		BatchSize          int `mapstructure:"batch_size"`
+		RequestIntervalMs  int `mapstructure:"request_interval_ms"`
+		RetryCount         int `mapstructure:"retry_count"`
+		TimeoutMs          int `mapstructure:"timeout_ms"`
 	} `mapstructure:"collector"`
 	// Metadata paths.
 	Metadata struct {
@@ -71,6 +71,26 @@ func DefaultConfig(dataRoot string) *Config {
 }
 
 func (c *Config) resolvePaths() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.DataLayers.Raw = filepath.Join(c.DataRoot, "data", "raw")
+	c.DataLayers.Staging = filepath.Join(c.DataRoot, "data", "staging")
+	c.DataLayers.Core = filepath.Join(c.DataRoot, "data", "core")
+	c.DataLayers.Factor = filepath.Join(c.DataRoot, "data", "factor")
+	c.Metadata.DBPath = filepath.Join(c.DataRoot, "metadata", "axdata.sqlite")
+	c.Metadata.CollectorPath = filepath.Join(c.DataRoot, "metadata", "collector.json")
+	c.Metadata.PluginsPath = filepath.Join(c.DataRoot, "metadata", "plugins.json")
+}
+
+// SetDataRoot changes the data root and re-derives every dependent path. Call
+// this after the CLI flag is parsed, since paths are computed at construction.
+func (c *Config) SetDataRoot(dataRoot string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.DataRoot = dataRoot
+
 	c.DataLayers.Raw = filepath.Join(c.DataRoot, "data", "raw")
 	c.DataLayers.Staging = filepath.Join(c.DataRoot, "data", "staging")
 	c.DataLayers.Core = filepath.Join(c.DataRoot, "data", "core")
@@ -123,5 +143,7 @@ func (c *Config) DataDir(layer string) string {
 
 // CorePath returns the Parquet file path for a core table.
 func (c *Config) CorePath(table string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return filepath.Join(c.DataLayers.Core, table+".parquet")
 }

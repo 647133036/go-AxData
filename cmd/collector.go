@@ -214,7 +214,8 @@ func (r *RootCmd) runTaskInfo(taskID string) {
 	task, ok := r.collector.GetTask(taskID)
 	if !ok {
 		fmt.Printf("Task not found: %s\n", taskID)
-		return}
+		return
+	}
 
 	fmt.Printf("Task ID:       %s\n", task.ID)
 	fmt.Printf("Name:          %s\n", task.Name)
@@ -232,7 +233,8 @@ func (r *RootCmd) runTaskEnable(taskID string, enable bool) {
 	err := r.collector.UpdateTask(taskID, updates)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
-		return}
+		return
+	}
 
 	action := "enabled"
 	if !enable {
@@ -246,7 +248,8 @@ func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) {
 	run, err := r.collector.RunTask(ctx, taskID)
 	if err != nil {
 		fmt.Printf("Run error: %v\n", err)
-		return}
+		return
+	}
 
 	fmt.Printf("Run ID:    %s\n", run.RunID)
 	fmt.Printf("Status:    %s\n", run.Status)
@@ -260,7 +263,8 @@ func (r *RootCmd) runRunList() {
 	runs := r.collector.ListRuns()
 	if len(runs) == 0 {
 		fmt.Println("No runs yet.")
-		return}
+		return
+	}
 
 	fmt.Printf("%-8s %-20s %-10s %-8s\n", "RUN_ID", "TASK_ID", "STATUS", "ROWS")
 	fmt.Println(strings.Repeat("-", 50))
@@ -273,7 +277,8 @@ func (r *RootCmd) runRunInfo(runID string) {
 	run, ok := r.collector.GetRun(runID)
 	if !ok {
 		fmt.Printf("Run not found: %s\n", runID)
-		return}
+		return
+	}
 
 	data, _ := json.MarshalIndent(run, "", "  ")
 	fmt.Printf("%s\n", data)

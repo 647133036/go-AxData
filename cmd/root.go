@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/electkismet/axdata-go/core/cache"
 	"github.com/electkismet/axdata-go/core/collector"
 	"github.com/electkismet/axdata-go/core/config"
 	"github.com/electkismet/axdata-go/core/plugin"
 	"github.com/electkismet/axdata-go/core/query"
+	"github.com/electkismet/axdata-go/core/schema"
 	"github.com/electkismet/axdata-go/core/storage"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -17,12 +19,13 @@ import (
 
 // RootCmd holds the root CLI command.
 type RootCmd struct {
-	cfg         *config.Config
-	store       *storage.Store
-	querier     *query.Querier
-	collector   *collector.Collector
-	pluginMgr   *plugin.PluginManager
-	logger      *zap.Logger
+	cfg       *config.Config
+	store     *storage.Store
+	querier   *query.Querier
+	collector *collector.Collector
+	pluginMgr *plugin.PluginManager
+	logger    *zap.Logger
+	getter    *cache.Getter
 
 	cmd *cobra.Command
 }
@@ -36,6 +39,7 @@ func NewRootCommand(cfg *config.Config, store *storage.Store, querier *query.Que
 		collector: collector,
 		pluginMgr: pluginMgr,
 		logger:    logger,
+		getter:    cache.New(cfg, store, querier, logger),
 	}
 
 	cmd := &cobra.Command{
@@ -45,6 +49,18 @@ func NewRootCommand(cfg *config.Config, store *storage.Store, querier *query.Que
 	}
 
 	cmd.PersistentFlags().StringVar(&cfg.DataRoot, "data-root", cfg.DataRoot, "Root directory for AxData data")
+
+	// Paths are derived from DataRoot at construction time, so re-derive them
+	// once the flag has been parsed or they keep pointing at the default root.
+	cmd.PersistentPreRun = func(c *cobra.Command, args []string) {
+		cfg.SetDataRoot(cfg.DataRoot)
+
+		// Written to stderr so that commands emitting JSON on stdout stay
+		// machine-parseable when piped.
+		fmt.Fprintf(os.Stderr, "AxData Go v2.0.0 - Quantitative Data Platform\n")
+		fmt.Fprintf(os.Stderr, "Data root: %s\n", cfg.DataRoot)
+		fmt.Fprintf(os.Stderr, "Tables available: %d\n", len(schema.TableRegistryNames()))
+	}
 
 	root.cmd = cmd
 	root.registerCommands()
@@ -72,9 +88,13 @@ func (r *RootCmd) registerCommands() {
 	r.cmd.AddCommand(newRequestCmd(r))
 	// collector
 	r.cmd.AddCommand(newCollectorCmd(r))
-	// api
-	r.cmd.AddCommand(newAPIServeCmd(r))
 	r.addPluginCmd()
+	// analyst suite
+	r.cmd.AddCommand(newMarketCmd(r))
+	r.cmd.AddCommand(newFundamentalCmd(r))
+	r.cmd.AddCommand(newEarningsCmd(r))
+	r.cmd.AddCommand(newValuationCmd(r))
+	r.cmd.AddCommand(newPortfolioCmd(r))
 }
 
 // initCmd initializes the data root.

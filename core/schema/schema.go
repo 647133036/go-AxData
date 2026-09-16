@@ -48,14 +48,131 @@ type StockBasicRecord struct {
 	ListingStatus string  `parquet:"listing_status"`
 }
 
+// IncomeRecord represents one period of an income statement.
+// Margin and ratio columns are fractions in [0,1].
+type IncomeRecord struct {
+	TsCode           string  `parquet:"ts_code"`
+	Symbol           string  `parquet:"symbol"`
+	Exchange         string  `parquet:"exchange"`
+	Name             string  `parquet:"name"`
+	Industry         string  `parquet:"industry"`
+	ReportDate       string  `parquet:"report_date"`
+	NoticeDate       string  `parquet:"notice_date"`
+	ReportType       string  `parquet:"report_type"`
+	Revenue          float64 `parquet:"revenue"`
+	OperatingCost    float64 `parquet:"operating_cost"`
+	TotalOperateCost float64 `parquet:"total_operate_cost"`
+	NetProfit        float64 `parquet:"net_profit"`
+	NetProfitDeduct  float64 `parquet:"net_profit_deduct"`
+	OperatingProfit  float64 `parquet:"operating_profit"`
+	TotalProfit      float64 `parquet:"total_profit"`
+	Tax              float64 `parquet:"tax"`
+	GrossMargin      float64 `parquet:"gross_margin"`
+}
+
+// BalanceRecord represents one period of a balance sheet.
+type BalanceRecord struct {
+	TsCode           string  `parquet:"ts_code"`
+	Symbol           string  `parquet:"symbol"`
+	Exchange         string  `parquet:"exchange"`
+	Name             string  `parquet:"name"`
+	Industry         string  `parquet:"industry"`
+	ReportDate       string  `parquet:"report_date"`
+	NoticeDate       string  `parquet:"notice_date"`
+	TotalAssets      float64 `parquet:"total_assets"`
+	TotalLiabilities float64 `parquet:"total_liabilities"`
+	TotalEquity      float64 `parquet:"total_equity"`
+	EquityRatio      float64 `parquet:"equity_ratio"`
+	DebtAssetRatio   float64 `parquet:"debt_asset_ratio"`
+	LeverageRatio    float64 `parquet:"leverage_ratio"`
+}
+
+// CashflowRecord represents one period of a cash flow statement.
+type CashflowRecord struct {
+	TsCode          string  `parquet:"ts_code"`
+	Symbol          string  `parquet:"symbol"`
+	Exchange        string  `parquet:"exchange"`
+	Name            string  `parquet:"name"`
+	Industry        string  `parquet:"industry"`
+	ReportDate      string  `parquet:"report_date"`
+	NoticeDate      string  `parquet:"notice_date"`
+	OCF             float64 `parquet:"ocf"`
+	OCFRatio        float64 `parquet:"ocf_ratio"`
+	InvestCashflow  float64 `parquet:"invest_cashflow"`
+	FinanceCashflow float64 `parquet:"finance_cashflow"`
+	Capex           float64 `parquet:"capex"`
+	FreeCashFlow    float64 `parquet:"free_cash_flow"`
+	CashEnd         float64 `parquet:"cash_end"`
+	CashBegin       float64 `parquet:"cash_begin"`
+}
+
+// BusinessScopeRecord represents one line of a main-business breakdown.
+// Ratio columns are fractions in [0,1].
+type BusinessScopeRecord struct {
+	TsCode           string  `parquet:"ts_code"`
+	Symbol           string  `parquet:"symbol"`
+	Exchange         string  `parquet:"exchange"`
+	ReportDate       string  `parquet:"report_date"`
+	MainopType       string  `parquet:"mainop_type"`
+	ItemName         string  `parquet:"item_name"`
+	Income           float64 `parquet:"income"`
+	IncomeRatio      float64 `parquet:"income_ratio"`
+	Cost             float64 `parquet:"cost"`
+	Profit           float64 `parquet:"profit"`
+	GrossProfitRatio float64 `parquet:"gross_profit_ratio"`
+	Rank             int64   `parquet:"rank"`
+}
+
+// EarningsForecastRecord represents one profit pre-announcement.
+// ChangeLower and ChangeUpper are percentage points of growth.
+type EarningsForecastRecord struct {
+	TsCode       string  `parquet:"ts_code"`
+	Symbol       string  `parquet:"symbol"`
+	Exchange     string  `parquet:"exchange"`
+	Name         string  `parquet:"name"`
+	NoticeDate   string  `parquet:"notice_date"`
+	ReportDate   string  `parquet:"report_date"`
+	ForecastItem string  `parquet:"forecast_item"`
+	ForecastType string  `parquet:"forecast_type"`
+	AmountLower  float64 `parquet:"amount_lower"`
+	AmountUpper  float64 `parquet:"amount_upper"`
+	ChangeLower  float64 `parquet:"change_lower"`
+	ChangeUpper  float64 `parquet:"change_upper"`
+	Reason       string  `parquet:"reason"`
+	ReportPeriod string  `parquet:"report_period"`
+}
+
+// ValuationSnapshotRecord represents one day of valuation metrics.
+// ChangePct is in percentage points.
+type ValuationSnapshotRecord struct {
+	TsCode         string  `parquet:"ts_code"`
+	Symbol         string  `parquet:"symbol"`
+	Exchange       string  `parquet:"exchange"`
+	Name           string  `parquet:"name"`
+	Industry       string  `parquet:"industry"`
+	TradeDate      string  `parquet:"trade_date"`
+	ClosePrice     float64 `parquet:"close_price"`
+	ChangePct      float64 `parquet:"change_pct"`
+	TotalMarketCap float64 `parquet:"total_market_cap"`
+	FreeMarketCap  float64 `parquet:"free_market_cap"`
+	TotalShares    float64 `parquet:"total_shares"`
+	FreeShares     float64 `parquet:"free_shares"`
+	PERatio        float64 `parquet:"pe_ttm"`
+	PELAR          float64 `parquet:"pe_lar"`
+	PBRatio        float64 `parquet:"pb"`
+	PSRatio        float64 `parquet:"ps_ttm"`
+	PCRatio        float64 `parquet:"pcf_ttm"`
+	PEG            float64 `parquet:"peg"`
+}
+
 // TableSchema holds metadata about a data table.
 type TableSchema struct {
-	Name         string
-	Columns      []ColumnSchema
-	PrimaryKeys  []string
-	Description  string
-	Layer        string // raw, staging, core, factor
-	WriteMode    string // append, snapshot, overwrite_partition, replace_range, upsert_by_key
+	Name        string
+	Columns     []ColumnSchema
+	PrimaryKeys []string
+	Description string
+	Layer       string // raw, staging, core, factor
+	WriteMode   string // append, snapshot, overwrite_partition, replace_range, upsert_by_key
 }
 
 // ColumnSchema describes a single column.
@@ -1234,6 +1351,143 @@ var TableRegistry = map[string]*TableSchema{
 			{Name: "pe_forecast_this_year", Type: "float64"},
 			{Name: "file_size_kb", Type: "float64"},
 			{Name: "page_count", Type: "int64"},
+		},
+	},
+	"fin_income": &TableSchema{
+		Name:        "fin_income",
+		Description: "Income statements (Eastmoney datacenter)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "industry", Type: "string"},
+			{Name: "report_date", Type: "string"},
+			{Name: "notice_date", Type: "string"},
+			{Name: "report_type", Type: "string"},
+			{Name: "revenue", Type: "float64"},
+			{Name: "operating_cost", Type: "float64"},
+			{Name: "total_operate_cost", Type: "float64"},
+			{Name: "net_profit", Type: "float64"},
+			{Name: "net_profit_deduct", Type: "float64"},
+			{Name: "operating_profit", Type: "float64"},
+			{Name: "total_profit", Type: "float64"},
+			{Name: "tax", Type: "float64"},
+			{Name: "gross_margin", Type: "float64"},
+		},
+	},
+	"fin_balance": &TableSchema{
+		Name:        "fin_balance",
+		Description: "Balance sheets (Eastmoney datacenter)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "industry", Type: "string"},
+			{Name: "report_date", Type: "string"},
+			{Name: "notice_date", Type: "string"},
+			{Name: "total_assets", Type: "float64"},
+			{Name: "total_liabilities", Type: "float64"},
+			{Name: "total_equity", Type: "float64"},
+			{Name: "equity_ratio", Type: "float64"},
+			{Name: "debt_asset_ratio", Type: "float64"},
+			{Name: "leverage_ratio", Type: "float64"},
+		},
+	},
+	"fin_cashflow": &TableSchema{
+		Name:        "fin_cashflow",
+		Description: "Cash flow statements (Eastmoney datacenter)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "industry", Type: "string"},
+			{Name: "report_date", Type: "string"},
+			{Name: "notice_date", Type: "string"},
+			{Name: "ocf", Type: "float64"},
+			{Name: "ocf_ratio", Type: "float64"},
+			{Name: "invest_cashflow", Type: "float64"},
+			{Name: "finance_cashflow", Type: "float64"},
+			{Name: "capex", Type: "float64"},
+			{Name: "free_cash_flow", Type: "float64"},
+			{Name: "cash_end", Type: "float64"},
+			{Name: "cash_begin", Type: "float64"},
+		},
+	},
+	"business_scope": &TableSchema{
+		Name:        "business_scope",
+		Description: "Main business composition (Eastmoney HSF10)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "report_date", Type: "string"},
+			{Name: "mainop_type", Type: "string"},
+			{Name: "item_name", Type: "string"},
+			{Name: "income", Type: "float64"},
+			{Name: "income_ratio", Type: "float64"},
+			{Name: "cost", Type: "float64"},
+			{Name: "profit", Type: "float64"},
+			{Name: "gross_profit_ratio", Type: "float64"},
+			{Name: "rank", Type: "int64"},
+		},
+	},
+	"earnings_forecast": &TableSchema{
+		Name:        "earnings_forecast",
+		Description: "Profit pre-announcements (Eastmoney datacenter)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "notice_date", Type: "string"},
+			{Name: "report_date", Type: "string"},
+			{Name: "forecast_item", Type: "string"},
+			{Name: "forecast_type", Type: "string"},
+			{Name: "amount_lower", Type: "float64"},
+			{Name: "amount_upper", Type: "float64"},
+			{Name: "change_lower", Type: "float64"},
+			{Name: "change_upper", Type: "float64"},
+			{Name: "reason", Type: "string"},
+			{Name: "report_period", Type: "string"},
+		},
+	},
+	"valuation_snapshot": &TableSchema{
+		Name:        "valuation_snapshot",
+		Description: "Daily valuation metrics (Eastmoney datacenter)",
+		Layer:       "core",
+		WriteMode:   "snapshot",
+		Columns: []ColumnSchema{
+			{Name: "ts_code", Type: "string"},
+			{Name: "symbol", Type: "string"},
+			{Name: "exchange", Type: "string"},
+			{Name: "name", Type: "string"},
+			{Name: "industry", Type: "string"},
+			{Name: "trade_date", Type: "string"},
+			{Name: "close_price", Type: "float64"},
+			{Name: "change_pct", Type: "float64"},
+			{Name: "total_market_cap", Type: "float64"},
+			{Name: "free_market_cap", Type: "float64"},
+			{Name: "total_shares", Type: "float64"},
+			{Name: "free_shares", Type: "float64"},
+			{Name: "pe_ttm", Type: "float64"},
+			{Name: "pe_lar", Type: "float64"},
+			{Name: "pb", Type: "float64"},
+			{Name: "ps_ttm", Type: "float64"},
+			{Name: "pcf_ttm", Type: "float64"},
+			{Name: "peg", Type: "float64"},
 		},
 	},
 	"market_mainline_cls": &TableSchema{
