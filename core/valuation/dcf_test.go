@@ -209,30 +209,57 @@ func TestDCFSensitivityMonotonic(t *testing.T) {
 		}
 	}
 
-	// Value falls as WACC rises within a row, and rises as terminal growth
-	// rises down a column. Both directions must hold across every feasible
-	// cell, not just at the corners, or a transposed axis slips through.
-	for i, row := range res.Sensitivity {
-		for j, cell := range row {
-			if cell.Value == 0 {
-				continue
-			}
-			if j+1 < len(row) {
-				next := row[j+1]
-				if next.Value != 0 && !(cell.Value > next.Value) {
-					t.Fatalf("row %d: value should fall as wacc rises %.6f -> %.6f",
-						i, cell.Value, next.Value)
-				}
-			}
-			if i+1 < len(res.Sensitivity) {
-				up := res.Sensitivity[i+1][j]
-				if up.Value != 0 && !(up.Value > cell.Value) {
-					t.Fatalf("col %d: value should rise as growth rises %.6f -> %.6f",
-						j, cell.Value, up.Value)
-				}
+	// Value falls as WACC rises within a row and rises as terminal growth
+	// rises down a column, across every feasible cell rather than only the
+	// corners. Infeasible cells are contiguous (a wacc prefix in each row, a
+	// growth suffix in each column), so dropping them leaves feasible pairs
+	// adjacent and the strict order still has to hold.
+	rows := len(res.Sensitivity)
+	cols := len(res.Sensitivity[0])
+	for i := 0; i < rows; i++ {
+		vals := []float64{}
+		for j := 0; j < cols; j++ {
+			if v := res.Sensitivity[i][j].Value; v != 0 {
+				vals = append(vals, v)
 			}
 		}
+		if !isMonotonicDecreasing(vals) {
+			t.Fatalf("row %d: value must fall as wacc rises: %v", i, vals)
+		}
 	}
+	for j := 0; j < cols; j++ {
+		vals := []float64{}
+		for i := 0; i < rows; i++ {
+			if v := res.Sensitivity[i][j].Value; v != 0 {
+				vals = append(vals, v)
+			}
+		}
+		if !isMonotonicIncreasing(vals) {
+			t.Fatalf("col %d: value must rise as growth rises: %v", j, vals)
+		}
+	}
+}
+
+// isMonotonicDecreasing and isMonotonicIncreasing are one-pass deciders: one
+// comparison per adjacent pair, a verdict and nothing else. stdlib
+// slices.IsSorted covers only the non-strict case, which would accept a flat
+// grid where the value stops moving.
+func isMonotonicDecreasing(vals []float64) bool {
+	for i := 1; i < len(vals); i++ {
+		if vals[i-1] <= vals[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func isMonotonicIncreasing(vals []float64) bool {
+	for i := 1; i < len(vals); i++ {
+		if vals[i-1] >= vals[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestDCFSensitivitySkipsInfeasibleCells(t *testing.T) {

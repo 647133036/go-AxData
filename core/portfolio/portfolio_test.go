@@ -316,21 +316,36 @@ func TestCorrelationMonotonicDegradation(t *testing.T) {
 		t.Fatalf("noise seed correlated with signal: %f", r)
 	}
 
-	prev := math.Inf(1)
-	for _, w := range []float64{0, 0.25, 0.5, 1, 2, 4, 8} {
+	weights := []float64{0, 0.25, 0.5, 1, 2, 4, 8}
+	corrs := make([]float64, len(weights))
+	for k, w := range weights {
 		mixed := make([]float64, len(signal))
 		for i := range signal {
 			mixed[i] = signal[i] + w*noise[i]
 		}
-		r := pearson(signal, mixed)
-		if math.Abs(r) > 1+1e-9 {
-			t.Fatalf("correlation out of range at weight %v: %f", w, r)
-		}
-		if r >= prev {
-			t.Fatalf("correlation must strictly decrease as noise weight rises: %f at weight %v follows %f", r, w, prev)
-		}
-		prev = r
+		corrs[k] = pearson(signal, mixed)
 	}
+	for k, r := range corrs {
+		if math.Abs(r) > 1+1e-9 {
+			t.Fatalf("correlation out of range at weight %v: %f", weights[k], r)
+		}
+	}
+	if !isMonotonicDecreasing(corrs) {
+		t.Fatalf("correlation must strictly decrease as noise weight rises: %v", corrs)
+	}
+}
+
+// isMonotonicDecreasing is a one-pass decider: one comparison per adjacent
+// pair, a verdict and nothing else. stdlib slices.IsSorted covers only the
+// non-strict case, which would accept a flat sequence where the value stops
+// moving.
+func isMonotonicDecreasing(vals []float64) bool {
+	for i := 1; i < len(vals); i++ {
+		if vals[i-1] <= vals[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestVolatilityPositive(t *testing.T) {
