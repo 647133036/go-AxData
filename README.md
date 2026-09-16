@@ -255,4 +255,8 @@ source.Register(mysource.NewMySourceAdapter())
 
 ## 许可证
 
-MIT
+GNU Affero GPL v3 (AGPL-3.0-only)，完整文本见仓库根目录 `LICENSE`。
+
+版权 2026 AxData-go 贡献者。
+
+采用 AGPL 是为了引入 AGPL 许可的技术指标库 `github.com/cinar/indicator/v2`。AGPL 的附加义务：修改本项目的源码后，必须以 AGPL 兼容许可发布；通过网络向用户提供服务时，还需向该用户同时提供对应版本的完整对应源码（第 13 条）。
