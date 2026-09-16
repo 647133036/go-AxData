@@ -45,13 +45,13 @@ func (r *RootCmd) addPluginCmd() {
 		Use:   "install <path>",
 		Short: "Install a plugin",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			err := pm.Install(args[0])
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return
+				return err
 			}
 			fmt.Printf("Plugin installed: %s\n", args[0])
+			return nil
 		},
 	})
 
@@ -60,13 +60,13 @@ func (r *RootCmd) addPluginCmd() {
 		Use:   "uninstall <id>",
 		Short: "Uninstall a plugin",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			err := pm.Uninstall(args[0])
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return
+				return err
 			}
 			fmt.Printf("Plugin uninstalled: %s\n", args[0])
+			return nil
 		},
 	})
 
@@ -75,13 +75,13 @@ func (r *RootCmd) addPluginCmd() {
 		Use:   "enable <id>",
 		Short: "Enable a plugin",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			err := pm.Enable(args[0])
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return
+				return err
 			}
 			fmt.Printf("Plugin enabled: %s\n", args[0])
+			return nil
 		},
 	})
 
@@ -90,13 +90,13 @@ func (r *RootCmd) addPluginCmd() {
 		Use:   "disable <id>",
 		Short: "Disable a plugin",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			err := pm.Disable(args[0])
 			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return
+				return err
 			}
 			fmt.Printf("Plugin disabled: %s\n", args[0])
+			return nil
 		},
 	})
 
@@ -105,15 +105,15 @@ func (r *RootCmd) addPluginCmd() {
 		Use:   "info <id>",
 		Short: "Show plugin details",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			p, ok := pm.Get(args[0])
 			if !ok {
-				fmt.Printf("Plugin not found: %s\n", args[0])
-				return
+				return fmt.Errorf("plugin not found: %s", args[0])
 			}
 
 			data, _ := json.MarshalIndent(p, "", "  ")
 			fmt.Printf("%s\n", data)
+			return nil
 		},
 	})
 

@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -50,11 +51,75 @@ func TestValidateSQLReject(t *testing.T) {
 		"UPDATE daily",
 		"SELECT 1 -- comment",
 		"SELECT 1; DROP",
+		// Catalog and filesystem writes.
+		"COPY daily TO '/tmp/out.parquet'",
+		"MERGE INTO daily USING other",
+		"ATTACH 'local.db' AS db2",
+		// Extensions and external readers reach the filesystem or the network.
+		"INSTALL httpfs",
+		"LOAD httpfs",
+		"SELECT * FROM read_csv('/etc/passwd')",
+		"SELECT * FROM read_parquet('/etc/passwd')",
+		"SELECT * FROM read_json('/etc/passwd')",
+		"SELECT http_get('https://evil.example')",
+		"SELECT curl('https://evil.example')",
+		"SELECT system('id')",
+		// Case and whitespace variants.
+		"   drop table daily",
+		"SeLeCcT * FrOm reAd_pArQuEt('/x')",
 	}
 	for _, sql := range badQueries {
 		if err := ValidateSQL(sql); err == nil {
 			t.Errorf("Should reject %q", sql)
 		}
+	}
+}
+
+// TestAttachParquetRepeatable proves the same staging table name can be attached
+// twice. The handler reuses one fixed name, so a plain CREATE TABLE made every
+// second request fail with "relation already exists" and returned a 500.
+func TestAttachParquetRepeatable(t *testing.T) {
+	q, err := NewQuerier()
+	if err != nil {
+		t.Fatalf("NewQuerier failed: %v", err)
+	}
+	defer q.Close()
+
+	// Build a tiny parquet on disk so read_parquet has something to read.
+	q.Execute(context.Background(), "CREATE TABLE src AS SELECT 1 AS a, 'x' AS b")
+	path := t.TempDir() + "/src.parquet"
+	if _, err := q.Execute(context.Background(),
+		"COPY src TO '"+path+"' (FORMAT PARQUET)"); err != nil {
+		t.Fatalf("make parquet: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := q.AttachParquet(ctx, "data_table", path); err != nil {
+		t.Fatalf("first attach failed: %v", err)
+	}
+	if err := q.AttachParquet(ctx, "data_table", path); err != nil {
+		t.Fatalf("second attach failed: %v", err)
+	}
+
+	rows, err := q.Execute(ctx, "SELECT a FROM data_table")
+	if err != nil {
+		t.Fatalf("query attached table: %v", err)
+	}
+	if len(rows) != 1 || len(rows[0]) != 1 {
+		t.Fatalf("rows = %v, want a single one-column row", rows)
+	}
+	if got := fmt.Sprint(rows[0][0]); got != "1" {
+		t.Errorf("row value = %q (%T), want 1", got, rows[0][0])
+	}
+}
+
+// TestQuoteSQLEscapesQuotes ensures a single quote in a path cannot terminate
+// the string literal and rewrite the statement.
+func TestQuoteSQLEscapesQuotes(t *testing.T) {
+	got := quoteSQL("/tmp/dir/o'brien.parquet")
+	want := "'/tmp/dir/o''brien.parquet'"
+	if got != want {
+		t.Errorf("quoteSQL = %q, want %q", got, want)
 	}
 }
 

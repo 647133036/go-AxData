@@ -5,19 +5,19 @@ import "context"
 // SourceInterface defines the metadata for one callable interface exposed by a provider.
 // This is the single source of truth for interface documentation, examples, and parameters.
 type SourceInterface struct {
-	Name             string                 `json:"name"`                // Global unique interface name
-	DisplayNameZh    string                 `json:"display_name_zh"`     // Chinese display name
-	SourceCode       string                 `json:"source_code"`         // Data source namespace
-	AssetClass       string                 `json:"asset_class"`         // stock, index, fund, etc.
-	MenuPath         []string               `json:"menu_path"`           // Full menu path in Web catalog
-	SummaryZh        string                 `json:"summary_zh"`          // Short summary for interface page header
-	DescriptionZh    string                 `json:"description_zh"`      // Full Chinese description body
-	ParamsNoteZh     string                 `json:"params_note_zh"`      // Chinese supplement for parameters
-	ParamsExampleZh  string                 `json:"params_example_zh"`   // Static SDK call example
-	Parameters       []ParameterDefinition  `json:"parameters"`          // Parameter definitions
-	Fields           []FieldDefinition      `json:"fields"`              // Return field definitions
-	Example          *RequestExample        `json:"example"`             // Single main example for runtime display
-	ReferenceSections []ReferenceSection    `json:"reference_sections"`  // Static reference tables (enums, category codes)
+	Name              string                `json:"name"`               // Global unique interface name
+	DisplayNameZh     string                `json:"display_name_zh"`    // Chinese display name
+	SourceCode        string                `json:"source_code"`        // Data source namespace
+	AssetClass        string                `json:"asset_class"`        // stock, index, fund, etc.
+	MenuPath          []string              `json:"menu_path"`          // Full menu path in Web catalog
+	SummaryZh         string                `json:"summary_zh"`         // Short summary for interface page header
+	DescriptionZh     string                `json:"description_zh"`     // Full Chinese description body
+	ParamsNoteZh      string                `json:"params_note_zh"`     // Chinese supplement for parameters
+	ParamsExampleZh   string                `json:"params_example_zh"`  // Static SDK call example
+	Parameters        []ParameterDefinition `json:"parameters"`         // Parameter definitions
+	Fields            []FieldDefinition     `json:"fields"`             // Return field definitions
+	Example           *RequestExample       `json:"example"`            // Single main example for runtime display
+	ReferenceSections []ReferenceSection    `json:"reference_sections"` // Static reference tables (enums, category codes)
 }
 
 // ParameterDefinition describes one parameter of an interface.
@@ -39,15 +39,15 @@ type FieldDefinition struct {
 
 // RequestExample is a static sample response from a real request.
 type RequestExample struct {
-	Params map[string]interface{} `json:"params"`
+	Params map[string]interface{}   `json:"params"`
 	Result []map[string]interface{} `json:"result"`
 }
 
 // ReferenceSection is a static reference table for the interface page.
 type ReferenceSection struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Entries     []map[string]string    `json:"entries"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Entries     []map[string]string `json:"entries"`
 }
 
 // SourceProvider is the bridge between a plugin package and the AxData source_request system.

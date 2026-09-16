@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -46,7 +47,7 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "add [task-name]",
 		Short: "Create a new task",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			sourceName, _ := cmd.Flags().GetString("source")
 			interfaceName, _ := cmd.Flags().GetString("interface")
 			table, _ := cmd.Flags().GetString("table")
@@ -54,11 +55,10 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 			var params map[string]interface{}
 			if paramsStr != "" {
 				if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
-					fmt.Printf("Error: invalid params JSON: %v\n", err)
-					return
+					return fmt.Errorf("invalid params JSON: %w", err)
 				}
 			}
-			r.runTaskAdd(args[0], sourceName, interfaceName, table, params)
+			return r.runTaskAdd(args[0], sourceName, interfaceName, table, params)
 		},
 	}
 	addCmd.Flags().String("source", "", "Source name")
@@ -72,8 +72,8 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "info [task-id]",
 		Short: "Show task details",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			r.runTaskInfo(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runTaskInfo(args[0])
 		},
 	})
 
@@ -82,8 +82,8 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "enable [task-id]",
 		Short: "Enable a task",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			r.runTaskEnable(args[0], true)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runTaskEnable(args[0], true)
 		},
 	})
 
@@ -92,8 +92,8 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "disable [task-id]",
 		Short: "Disable a task",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			r.runTaskEnable(args[0], false)
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runTaskEnable(args[0], false)
 		},
 	})
 
@@ -102,9 +102,9 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "run [task-id]",
 		Short: "Run a task",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			r.runTaskRun(ctx, args[0])
+			return r.runTaskRun(ctx, args[0])
 		},
 	})
 
@@ -131,8 +131,8 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 		Use:   "info [run-id]",
 		Short: "Show run details",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
-			r.runRunInfo(args[0])
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runRunInfo(args[0])
 		},
 	})
 
@@ -187,34 +187,30 @@ func (r *RootCmd) runTaskList() {
 	}
 }
 
-func (r *RootCmd) runTaskAdd(name, source, interfaceName, table string, params map[string]interface{}) {
+func (r *RootCmd) runTaskAdd(name, source, interfaceName, table string, params map[string]interface{}) error {
 	if source == "" {
-		fmt.Println("Error: --source flag required")
-		return
+		return errors.New("--source flag required")
 	}
 	if interfaceName == "" {
-		fmt.Println("Error: --interface flag required")
-		return
+		return errors.New("--interface flag required")
 	}
 	if table == "" {
-		fmt.Println("Error: --table flag required")
-		return
+		return errors.New("--table flag required")
 	}
 
 	task, err := r.collector.AddTask(name, source, interfaceName, table, "core", params)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return fmt.Errorf("add task: %w", err)
 	}
 
 	fmt.Printf("Task created: %s (ID: %s)\n", task.Name, task.ID)
+	return nil
 }
 
-func (r *RootCmd) runTaskInfo(taskID string) {
+func (r *RootCmd) runTaskInfo(taskID string) error {
 	task, ok := r.collector.GetTask(taskID)
 	if !ok {
-		fmt.Printf("Task not found: %s\n", taskID)
-		return
+		return fmt.Errorf("task not found: %s", taskID)
 	}
 
 	fmt.Printf("Task ID:       %s\n", task.ID)
@@ -226,14 +222,14 @@ func (r *RootCmd) runTaskInfo(taskID string) {
 	fmt.Printf("Enabled:       %v\n", task.Enabled)
 	fmt.Printf("Created:       %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Updated:       %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))
+	return nil
 }
 
-func (r *RootCmd) runTaskEnable(taskID string, enable bool) {
+func (r *RootCmd) runTaskEnable(taskID string, enable bool) error {
 	updates := map[string]interface{}{"enabled": enable}
 	err := r.collector.UpdateTask(taskID, updates)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return fmt.Errorf("update task: %w", err)
 	}
 
 	action := "enabled"
@@ -241,14 +237,14 @@ func (r *RootCmd) runTaskEnable(taskID string, enable bool) {
 		action = "disabled"
 	}
 	fmt.Printf("Task %s: %s\n", taskID, action)
+	return nil
 }
 
-func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) {
+func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) error {
 	fmt.Printf("Running task: %s\n", taskID)
 	run, err := r.collector.RunTask(ctx, taskID)
 	if err != nil {
-		fmt.Printf("Run error: %v\n", err)
-		return
+		return fmt.Errorf("run error: %w", err)
 	}
 
 	fmt.Printf("Run ID:    %s\n", run.RunID)
@@ -257,6 +253,7 @@ func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) {
 	if run.Error != "" {
 		fmt.Printf("Error:     %s\n", run.Error)
 	}
+	return nil
 }
 
 func (r *RootCmd) runRunList() {
@@ -273,15 +270,15 @@ func (r *RootCmd) runRunList() {
 	}
 }
 
-func (r *RootCmd) runRunInfo(runID string) {
+func (r *RootCmd) runRunInfo(runID string) error {
 	run, ok := r.collector.GetRun(runID)
 	if !ok {
-		fmt.Printf("Run not found: %s\n", runID)
-		return
+		return fmt.Errorf("run not found: %s", runID)
 	}
 
 	data, _ := json.MarshalIndent(run, "", "  ")
 	fmt.Printf("%s\n", data)
+	return nil
 }
 
 func (r *RootCmd) runCollectorStatus() {

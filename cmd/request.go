@@ -20,13 +20,13 @@ func newRequestCmd(r *RootCmd) *cobra.Command {
 		Short: "Test a source request",
 		Long:  "Make a test request to a data source and display results.",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			iface := make(map[string]interface{})
 			for k, v := range params {
 				iface[k] = v
 			}
-			r.runRequest(ctx, args[0], sourceName, interfaceName, iface)
+			return r.runRequest(ctx, args[0], sourceName, interfaceName, iface)
 		},
 	}
 
@@ -37,16 +37,14 @@ func newRequestCmd(r *RootCmd) *cobra.Command {
 	return cmd
 }
 
-func (r *RootCmd) runRequest(ctx context.Context, sourceID, sourceName, interfaceName string, params map[string]interface{}) {
+func (r *RootCmd) runRequest(ctx context.Context, sourceID, sourceName, interfaceName string, params map[string]interface{}) error {
 	if sourceName == "" {
 		sourceName = sourceID
 	}
 
 	adapter := collector.Lookup(sourceName)
 	if adapter == nil {
-		fmt.Printf("Unknown source: %s\n", sourceName)
-		fmt.Printf("Available sources: %v\n", collector.List())
-		return
+		return fmt.Errorf("unknown source: %s (available: %v)", sourceName, collector.List())
 	}
 
 	fmt.Printf("Requesting data from source: %s\n", adapter.Name())
@@ -62,13 +60,12 @@ func (r *RootCmd) runRequest(ctx context.Context, sourceID, sourceName, interfac
 
 	data, err := adapter.Request(ctx, reqParams)
 	if err != nil {
-		fmt.Printf("Request failed: %v\n", err)
-		return
+		return fmt.Errorf("request failed: %w", err)
 	}
 
 	if len(data) == 0 {
 		fmt.Println("No data returned")
-		return
+		return nil
 	}
 
 	fmt.Printf("Results: %d records\n\n", len(data))
@@ -80,4 +77,5 @@ func (r *RootCmd) runRequest(ctx context.Context, sourceID, sourceName, interfac
 		jsonData, _ := json.Marshal(record)
 		fmt.Printf("  [%d] %s\n", i+1, strings.TrimSpace(string(jsonData)))
 	}
+	return nil
 }

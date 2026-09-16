@@ -20,17 +20,17 @@ import (
 
 // Task defines a collection task.
 type Task struct {
-	ID          string        `json:"id"`
-	Name        string        `json:"name"`
-	Source      string        `json:"source"`
-	Interface   string        `json:"interface"`
-	Table       string        `json:"table"`
-	Layer       string        `json:"layer"`
-	Enabled     bool          `json:"enabled"`
-	Schedule    TaskSchedule  `json:"schedule"`
-	Params      map[string]interface{} `json:"params"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID        string                 `json:"id"`
+	Name      string                 `json:"name"`
+	Source    string                 `json:"source"`
+	Interface string                 `json:"interface"`
+	Table     string                 `json:"table"`
+	Layer     string                 `json:"layer"`
+	Enabled   bool                   `json:"enabled"`
+	Schedule  TaskSchedule           `json:"schedule"`
+	Params    map[string]interface{} `json:"params"`
+	CreatedAt time.Time              `json:"created_at"`
+	UpdatedAt time.Time              `json:"updated_at"`
 }
 
 // TaskSchedule defines when a task runs.
@@ -52,22 +52,22 @@ type Run struct {
 
 // Collector manages tasks and runs.
 type Collector struct {
-	logger     *zap.Logger
-	config     *config.Config
-	store      *storage.Store
-	tasks      map[string]*Task
-	tasksMu    sync.RWMutex
-	runs       map[string]*Run
-	runsMu     sync.RWMutex
-	semaphore  *semaphore.Weighted
-	metadata   *Metadata
+	logger    *zap.Logger
+	config    *config.Config
+	store     *storage.Store
+	tasks     map[string]*Task
+	tasksMu   sync.RWMutex
+	runs      map[string]*Run
+	runsMu    sync.RWMutex
+	semaphore *semaphore.Weighted
+	metadata  *Metadata
 }
 
 // Metadata holds the collector state.
 type Metadata struct {
-	Version string            `json:"version"`
-	Tasks   map[string]*Task  `json:"tasks"`
-	Runs    map[string]*Run   `json:"runs"`
+	Version string           `json:"version"`
+	Tasks   map[string]*Task `json:"tasks"`
+	Runs    map[string]*Run  `json:"runs"`
 }
 
 // NewCollector creates a new collector instance.
@@ -110,6 +110,14 @@ func (c *Collector) loadMetadata() error {
 	c.tasks = c.metadata.Tasks
 	c.runs = c.metadata.Runs
 	return nil
+}
+
+// ReloadMetadata re-reads collector state from the currently configured path.
+// NewCollector loads eagerly, but the --data-root flag is only parsed later, so
+// it reads the default root's state and silently discards the correct one.
+// PersistentPreRun calls this after re-deriving the paths.
+func (c *Collector) ReloadMetadata() error {
+	return c.loadMetadata()
 }
 
 // saveMetadata persists the collector state.
@@ -289,9 +297,10 @@ func (c *Collector) RunTask(ctx context.Context, taskID string) (*Run, error) {
 
 // executeTask performs the actual data collection.
 func (c *Collector) executeTask(ctx context.Context, task *Task) (int, error) {
-	// Get the source adapter
-	adapter, ok := SourceAdapters[task.Source]
-	if !ok {
+	// Lookup holds the registry read lock; reading the map directly races with
+	// Register, which is reachable from tests and from plugin loading.
+	adapter := Lookup(task.Source)
+	if adapter == nil {
 		return 0, fmt.Errorf("unknown source: %s", task.Source)
 	}
 

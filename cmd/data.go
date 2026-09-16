@@ -32,9 +32,9 @@ func newDataCmd(r *RootCmd) *cobra.Command {
 		Short: "Inspect a data table",
 		Long:  "Show detailed information about a data table including schema and record count.",
 		Args:  cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			r.runDataInspect(ctx, args[0])
+			return r.runDataInspect(ctx, args[0])
 		},
 	})
 
@@ -64,11 +64,10 @@ func (r *RootCmd) runDataList(ctx context.Context) {
 	}
 }
 
-func (r *RootCmd) runDataInspect(ctx context.Context, table string) {
+func (r *RootCmd) runDataInspect(ctx context.Context, table string) error {
 	schemaDef := schema.GetSchema(table)
 	if schemaDef == nil {
-		fmt.Printf("Table not found: %s\n", table)
-		return
+		return fmt.Errorf("table not found: %s", table)
 	}
 
 	fmt.Printf("Table: %s\n", table)
@@ -89,8 +88,12 @@ func (r *RootCmd) runDataInspect(ctx context.Context, table string) {
 	}
 
 	// Show record count
-	count, _ := r.store.Count("core", table)
+	count, err := r.store.Count("core", table)
+	if err != nil {
+		return fmt.Errorf("count records: %w", err)
+	}
 	fmt.Printf("\nRecords in core layer: %d\n", count)
+	return nil
 }
 
 func (r *RootCmd) runDataPreview(ctx context.Context, table string) {

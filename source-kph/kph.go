@@ -84,34 +84,34 @@ func (a *KPHAdapter) Request(ctx context.Context, params map[string]interface{})
 	}
 
 	switch interfaceName {
-  case "kph_sector_plate_detail":
-		return a.requestSectorPlateDetail(params)
+	case "kph_sector_plate_detail":
+		return a.requestSectorPlateDetail(ctx, params)
 	case "kph_sector_concept_detail":
-		return a.requestSectorConceptDetail(params)
+		return a.requestSectorConceptDetail(ctx, params)
 	case "kph_market_emotion":
-		return a.requestMarketEmotion(params)
+		return a.requestMarketEmotion(ctx, params)
 	case "kph_sector_ranking":
-		return a.requestSectorRanking(params)
+		return a.requestSectorRanking(ctx, params)
 	case "kph_sector_constituents_history":
-		return a.requestSectorConstituentsHistory(params)
+		return a.requestSectorConstituentsHistory(ctx, params)
 	case "kph_limit_up_history":
-		return a.requestLimitHistory(params, "up")
+		return a.requestLimitHistory(ctx, params, "up")
 	case "kph_limit_down_history":
-		return a.requestLimitHistory(params, "down")
+		return a.requestLimitHistory(ctx, params, "down")
 	case "kph_wind_vane_history":
-		return a.requestLimitHistory(params, "wind_vane")
+		return a.requestLimitHistory(ctx, params, "wind_vane")
 	case "kph_limit_ladder":
-		return a.requestLimitLadder(params)
+		return a.requestLimitLadder(ctx, params)
 	case "kph_market_review_events":
-		return a.requestMarketReviewEvents(params)
+		return a.requestMarketReviewEvents(ctx, params)
 	case "kph_limit_resumption_history":
-		return a.requestLimitResumptionHistory(params)
+		return a.requestLimitResumptionHistory(ctx, params)
 	default:
 		return nil, fmt.Errorf("KPH source adapter does not support interface %q", interfaceName)
 	}
 }
 
- func (a *KPHAdapter) requestSectorPlateDetail(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestSectorPlateDetail(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	plateID, err := requiredText(params, "stock_code")
 	if err != nil {
 		return nil, err
@@ -129,12 +129,12 @@ func (a *KPHAdapter) Request(ctx context.Context, params map[string]interface{})
 	}
 
 	p := map[string]string{
-		"a":        "plate_detail",
-		"c":        "ZhiShuRanking",
+		"a":          "plate_detail",
+		"c":          "ZhiShuRanking",
 		"stock_code": plateID,
-		"Date":    tradeDate,
+		"Date":       tradeDate,
 	}
-	payload, err := a.post(params, host, p, "KPH sector plate detail")
+	payload, err := a.post(ctx, params, host, p, "KPH sector plate detail")
 	if err != nil {
 		return nil, err
 	}
@@ -151,23 +151,23 @@ func parsePlateDetailRow(row []interface{}, tradeDate, plateID string) map[strin
 	identity := identityFromSymbol(at(row, 0))
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
 	return map[string]interface{}{
-		"trade_date":      d8,
-		"plate_id":        plateID,
-		"instrument_id":   identity["instrument_id"],
-		"symbol":          identity["symbol"],
-		"exchange":        identity["exchange"],
-		"name":            cleanText(at(row, 1)),
-		"last_price":      parseFloat(at(row, 5)),
-		"change_pct":      parseFloat(at(row, 6)),
-		"amount":          parseFloat(at(row, 7)),
-		"turnover_rate":   parseFloat(at(row, 8)),
-		"float_mv":        parseFloat(at(row, 10)),
-		"net_inflow":      parseFloat(at(row, 12)),
-		"main_net":        parseFloat(at(row, 13)),
+		"trade_date":    d8,
+		"plate_id":      plateID,
+		"instrument_id": identity["instrument_id"],
+		"symbol":        identity["symbol"],
+		"exchange":      identity["exchange"],
+		"name":          cleanText(at(row, 1)),
+		"last_price":    parseFloat(at(row, 5)),
+		"change_pct":    parseFloat(at(row, 6)),
+		"amount":        parseFloat(at(row, 7)),
+		"turnover_rate": parseFloat(at(row, 8)),
+		"float_mv":      parseFloat(at(row, 10)),
+		"net_inflow":    parseFloat(at(row, 12)),
+		"main_net":      parseFloat(at(row, 13)),
 	}
 }
 
-func (a *KPHAdapter) requestSectorConceptDetail(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestSectorConceptDetail(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	plateID, err := requiredText(params, "stock_code")
 	if err != nil {
 		return nil, err
@@ -185,12 +185,12 @@ func (a *KPHAdapter) requestSectorConceptDetail(params map[string]interface{}) (
 	}
 
 	p := map[string]string{
-		"a":        "concept_detail",
-		"c":        "ZhiShuRanking",
+		"a":          "concept_detail",
+		"c":          "ZhiShuRanking",
 		"stock_code": plateID,
-		"Date":    tradeDate,
+		"Date":       tradeDate,
 	}
-	payload, err := a.post(params, host, p, "KPH sector concept detail")
+	payload, err := a.post(ctx, params, host, p, "KPH sector concept detail")
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (a *KPHAdapter) requestSectorConceptDetail(params map[string]interface{}) (
 	return rows, nil
 }
 
-func (a *KPHAdapter) requestMarketEmotion(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestMarketEmotion(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	tradeDate, err := normalizeDate(params, false)
 	if err != nil {
 		return nil, err
@@ -227,7 +227,7 @@ func (a *KPHAdapter) requestMarketEmotion(params map[string]interface{}) ([]map[
 		p["Day"] = tradeDate
 	}
 
-	payload, err := a.post(params, host, p, "KPH market emotion")
+	payload, err := a.post(ctx, params, host, p, "KPH market emotion")
 	if err != nil {
 		return nil, err
 	}
@@ -238,21 +238,21 @@ func (a *KPHAdapter) requestMarketEmotion(params map[string]interface{}) ([]map[
 	}
 
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
-  row := map[string]interface{}{
-		"trade_date":              d8,
-		"limit_up_count":          parseInt(info["ZT"]),
-		"limit_down_count":        parseInt(info["DT"]),
-		"real_limit_up_count":     parseInt(info["SJZT"]),
-		"real_limit_down_count":   parseInt(info["SJDT"]),
-		"st_limit_up_count":       parseInt(info["STZT"]),
-		"st_limit_down_count":     parseInt(info["STDT"]),
-		"rise_count":              parseInt(info["SZJS"]),
-		"fall_count":              parseInt(info["XDJS"]),
-		"flat_count":              parseInt(info["0"]),
-		"market_sentiment":        cleanText(info["sign"]),
-		"market_amount":           parseFloat(info["qscln"]),
-		"raw_rise_dist":           buildRiseDist(info),
-		"raw_fall_dist":           buildFallDist(info),
+	row := map[string]interface{}{
+		"trade_date":            d8,
+		"limit_up_count":        parseInt(info["ZT"]),
+		"limit_down_count":      parseInt(info["DT"]),
+		"real_limit_up_count":   parseInt(info["SJZT"]),
+		"real_limit_down_count": parseInt(info["SJDT"]),
+		"st_limit_up_count":     parseInt(info["STZT"]),
+		"st_limit_down_count":   parseInt(info["STDT"]),
+		"rise_count":            parseInt(info["SZJS"]),
+		"fall_count":            parseInt(info["XDJS"]),
+		"flat_count":            parseInt(info["0"]),
+		"market_sentiment":      cleanText(info["sign"]),
+		"market_amount":         parseFloat(info["qscln"]),
+		"raw_rise_dist":         buildRiseDist(info),
+		"raw_fall_dist":         buildFallDist(info),
 	}
 	return []map[string]interface{}{row}, nil
 }
@@ -273,7 +273,7 @@ func buildFallDist(info map[string]interface{}) map[string]interface{} {
 	return m
 }
 
-func (a *KPHAdapter) requestSectorRanking(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestSectorRanking(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	tradeDate, err := normalizeDate(params, true)
 	if err != nil {
 		return nil, err
@@ -309,50 +309,50 @@ func (a *KPHAdapter) requestSectorRanking(params map[string]interface{}) ([]map[
 	var rows []map[string]interface{}
 	for {
 		p := map[string]string{
-			"a":     "RealRankingInfo",
-			"c":     "ZhiShuRanking",
-			"Order": "1",
-			"st":    strconv.Itoa(pageSize),
-			"Index": strconv.Itoa(index),
-			"Date":  tradeDate,
-			"Type":  typeParam,
+			"a":      "RealRankingInfo",
+			"c":      "ZhiShuRanking",
+			"Order":  "1",
+			"st":     strconv.Itoa(pageSize),
+			"Index":  strconv.Itoa(index),
+			"Date":   tradeDate,
+			"Type":   typeParam,
 			"ZSType": zsType,
 		}
-		payload, err := a.post(params, host, p, "KPH sector ranking")
+		payload, err := a.post(ctx, params, host, p, "KPH sector ranking")
 		if err != nil {
 			return nil, err
 		}
 		batch := payloadList(payload)
 		for _, row := range batch {
-            r := parseSectorRow(row, tradeDate, sectorType)
-            rows = append(rows, r)
-        }
-        if !fetchAll || len(batch) < pageSize {
-            break
-        }
-        index += pageSize
-    }
+			r := parseSectorRow(row, tradeDate, sectorType)
+			rows = append(rows, r)
+		}
+		if !fetchAll || len(batch) < pageSize {
+			break
+		}
+		index += pageSize
+	}
 	return rows, nil
 }
 
 func parseSectorRow(row []interface{}, tradeDate, sectorType string) map[string]interface{} {
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
 	return map[string]interface{}{
-		"trade_date":     d8,
-		"plate_id":       cleanText(at(row, 0)),
-		"plate_name":     cleanText(at(row, 1)),
-		"sector_type":    sectorType,
-		"amount":         parseFloat(at(row, 2)),
-		"change_pct":     parseFloat(at(row, 3)),
-		"amplitude":      parseFloat(at(row, 4)),
-		"net_inflow":     parseFloat(at(row, 5)),
-		"turnover_rate":  parseFloat(at(row, 9)),
-		"market_cap":     parseFloat(at(row, 10)),
-		"stock_count":    parseInt(at(row, 17)),
+		"trade_date":    d8,
+		"plate_id":      cleanText(at(row, 0)),
+		"plate_name":    cleanText(at(row, 1)),
+		"sector_type":   sectorType,
+		"amount":        parseFloat(at(row, 2)),
+		"change_pct":    parseFloat(at(row, 3)),
+		"amplitude":     parseFloat(at(row, 4)),
+		"net_inflow":    parseFloat(at(row, 5)),
+		"turnover_rate": parseFloat(at(row, 9)),
+		"market_cap":    parseFloat(at(row, 10)),
+		"stock_count":   parseInt(at(row, 17)),
 	}
 }
 
-func (a *KPHAdapter) requestSectorConstituentsHistory(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestSectorConstituentsHistory(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	plateID, err := requiredText(params, "plate_id")
 	if err != nil {
 		return nil, err
@@ -378,7 +378,7 @@ func (a *KPHAdapter) requestSectorConstituentsHistory(params map[string]interfac
 		"TSZB_Type":  "0",
 		"filterType": "0",
 	}
-	payload, err := a.post(params, KPH_HISTORY_URL, p, "KPH sector constituents history")
+	payload, err := a.post(ctx, params, KPH_HISTORY_URL, p, "KPH sector constituents history")
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +415,7 @@ func parseSectorConstituentRow(row []interface{}, tradeDate, plateID string) map
 	return m
 }
 
-func (a *KPHAdapter) requestLimitHistory(params map[string]interface{}, kind string) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestLimitHistory(ctx context.Context, params map[string]interface{}, kind string) ([]map[string]interface{}, error) {
 	tradeDate, err := historicalDate(params)
 	if err != nil {
 		return nil, err
@@ -426,21 +426,21 @@ func (a *KPHAdapter) requestLimitHistory(params map[string]interface{}, kind str
 	}
 
 	p := map[string]string{
-		"a":                "HisDaBanList",
-		"c":                "HisHomeDingPan",
-		"Order":            "1",
-		"st":               "50",
-		"Index":            "0",
-		"Is_st":            "1",
-		"PidType":          pid,
-		"Type":             "6",
+		"a":                 "HisDaBanList",
+		"c":                 "HisHomeDingPan",
+		"Order":             "1",
+		"st":                "50",
+		"Index":             "0",
+		"Is_st":             "1",
+		"PidType":           pid,
+		"Type":              "6",
 		"FilterMotherboard": "0",
-		"Filter":           "0",
-		"FilterTIB":        "0",
-		"FilterGem":        "0",
-		"Day":              tradeDate,
+		"Filter":            "0",
+		"FilterTIB":         "0",
+		"FilterGem":         "0",
+		"Day":               tradeDate,
 	}
-	payload, err := a.post(params, KPH_HISTORY_URL, p, fmt.Sprintf("KPH %s history", kind))
+	payload, err := a.post(ctx, params, KPH_HISTORY_URL, p, fmt.Sprintf("KPH %s history", kind))
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,7 @@ func parseLimitHistoryRow(row []interface{}, tradeDate, kind string) map[string]
 	identity := identityFromSymbol(at(row, 0))
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
 	m := map[string]interface{}{
-		"trade_date": tradeDate,
+		"trade_date":    tradeDate,
 		"instrument_id": identity["instrument_id"],
 		"symbol":        identity["symbol"],
 		"exchange":      identity["exchange"],
@@ -489,7 +489,7 @@ func parseLimitHistoryRow(row []interface{}, tradeDate, kind string) map[string]
 	return m
 }
 
-func (a *KPHAdapter) requestLimitLadder(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestLimitLadder(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	tradeDate, err := normalizeDate(params, false)
 	if err != nil {
 		return nil, err
@@ -507,7 +507,7 @@ func (a *KPHAdapter) requestLimitLadder(params map[string]interface{}) ([]map[st
 		"c":    "FuPanLa",
 		"Date": tradeDate,
 	}
-	payload, err := a.post(params, host, p, "KPH limit ladder")
+	payload, err := a.post(ctx, params, host, p, "KPH limit ladder")
 	if err != nil {
 		return nil, err
 	}
@@ -533,10 +533,10 @@ func (a *KPHAdapter) requestLimitLadder(params map[string]interface{}) ([]map[st
 		if inner, ok := groupArr[0].([]interface{}); ok {
 			for _, row := range inner {
 				if rowArr, ok := row.([]interface{}); ok {
-                    r := parseLadderRow(rowArr, tradeDate)
-                    rows = append(rows, r)
-                }
-            }
+					r := parseLadderRow(rowArr, tradeDate)
+					rows = append(rows, r)
+				}
+			}
 		} else {
 			r := parseLadderRow(groupArr, tradeDate)
 			rows = append(rows, r)
@@ -549,24 +549,24 @@ func parseLadderRow(row []interface{}, tradeDate string) map[string]interface{} 
 	identity := identityFromSymbol(at(row, 0))
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
 	return map[string]interface{}{
-		"trade_date":          d8,
-		"instrument_id":       identity["instrument_id"],
-		"symbol":              identity["symbol"],
-		"exchange":            identity["exchange"],
-		"name":                cleanText(at(row, 1)),
-		"limit_count":         parseInt(at(row, 2)),
-		"limit_time":          parseInt(at(row, 3)),
-		"plate_id":            cleanText(at(row, 4)),
-		"plate_name":          cleanText(at(row, 5)),
-		"one_word":            parseBoolValue(at(row, 6)),
-		"popular":             parseBoolValue(at(row, 7)),
+		"trade_date":           d8,
+		"instrument_id":        identity["instrument_id"],
+		"symbol":               identity["symbol"],
+		"exchange":             identity["exchange"],
+		"name":                 cleanText(at(row, 1)),
+		"limit_count":          parseInt(at(row, 2)),
+		"limit_time":           parseInt(at(row, 3)),
+		"plate_id":             cleanText(at(row, 4)),
+		"plate_name":           cleanText(at(row, 5)),
+		"one_word":             parseBoolValue(at(row, 6)),
+		"popular":              parseBoolValue(at(row, 7)),
 		"plate_limit_up_count": parseInt(at(row, 8)),
-		"amount":              parseFloat(at(row, 9)),
-		"plate_amount":        parseFloat(at(row, 10)),
+		"amount":               parseFloat(at(row, 9)),
+		"plate_amount":         parseFloat(at(row, 10)),
 	}
 }
 
-func (a *KPHAdapter) requestMarketReviewEvents(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestMarketReviewEvents(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	tradeDate, err := normalizeDate(params, false)
 	if err != nil {
 		return nil, err
@@ -599,7 +599,7 @@ func (a *KPHAdapter) requestMarketReviewEvents(params map[string]interface{}) ([
 		"Index": strconv.Itoa(offset),
 		"Date":  tradeDate,
 	}
-	payload, err := a.post(params, host, p, "KPH market review events")
+	payload, err := a.post(ctx, params, host, p, "KPH market review events")
 	if err != nil {
 		return nil, err
 	}
@@ -614,10 +614,10 @@ func (a *KPHAdapter) requestMarketReviewEvents(params map[string]interface{}) ([
 	}
 	for _, item := range list {
 		if m, ok := item.(map[string]interface{}); ok {
-            r := parseMarketEvent(m, tradeDate)
-            items = append(items, r)
-        }
-    }
+			r := parseMarketEvent(m, tradeDate)
+			items = append(items, r)
+		}
+	}
 	return items, nil
 }
 
@@ -640,7 +640,7 @@ func parseMarketEvent(item map[string]interface{}, tradeDate string) map[string]
 	}
 }
 
-func (a *KPHAdapter) requestLimitResumptionHistory(params map[string]interface{}) ([]map[string]interface{}, error) {
+func (a *KPHAdapter) requestLimitResumptionHistory(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	tradeDate, err := normalizeDate(params, false)
 	if err != nil {
 		return nil, err
@@ -669,7 +669,7 @@ func (a *KPHAdapter) requestLimitResumptionHistory(params map[string]interface{}
 		"Index": strconv.Itoa(offset),
 		"Date":  tradeDate,
 	}
-	payload, err := a.post(params, KPH_HISTORY_URL, p, "KPH limit resumption history")
+	payload, err := a.post(ctx, params, KPH_HISTORY_URL, p, "KPH limit resumption history")
 	if err != nil {
 		return nil, err
 	}
@@ -688,12 +688,12 @@ func (a *KPHAdapter) requestLimitResumptionHistory(params map[string]interface{}
 		for _, row := range stockList {
 			rowArr, ok := row.([]interface{})
 			if !ok {
-                continue
-            }
-            r := parseResumptionStock(rowArr, plateMap, tradeDate)
-            rows = append(rows, r)
-        }
-    }
+				continue
+			}
+			r := parseResumptionStock(rowArr, plateMap, tradeDate)
+			rows = append(rows, r)
+		}
+	}
 	return rows, nil
 }
 
@@ -701,22 +701,22 @@ func parseResumptionStock(row []interface{}, plate map[string]interface{}, trade
 	identity := identityFromSymbol(at(row, 0))
 	d8 := strings.ReplaceAll(tradeDate, "-", "")
 	return map[string]interface{}{
-		"trade_date":     d8,
-		"plate_id":       cleanText(plate["ZSCode"]),
-		"plate_name":     cleanText(plate["ZSName"]),
-		"instrument_id":  identity["instrument_id"],
-		"symbol":         identity["symbol"],
-		"exchange":       identity["exchange"],
-		"name":           cleanText(at(row, 1)),
-		"limit_tag":      cleanText(at(row, 9)),
-		"limit_count":    parseInt(at(row, 10)),
-		"themes":         cleanText(at(row, 11)),
-		"reason_short":   cleanText(at(row, 16)),
-		"reason_detail":  cleanText(at(row, 17)),
+		"trade_date":    d8,
+		"plate_id":      cleanText(plate["ZSCode"]),
+		"plate_name":    cleanText(plate["ZSName"]),
+		"instrument_id": identity["instrument_id"],
+		"symbol":        identity["symbol"],
+		"exchange":      identity["exchange"],
+		"name":          cleanText(at(row, 1)),
+		"limit_tag":     cleanText(at(row, 9)),
+		"limit_count":   parseInt(at(row, 10)),
+		"themes":        cleanText(at(row, 11)),
+		"reason_short":  cleanText(at(row, 16)),
+		"reason_detail": cleanText(at(row, 17)),
 	}
 }
 
-func (a *KPHAdapter) post(params map[string]interface{}, host string, extraParams map[string]string, context string) (map[string]interface{}, error) {
+func (a *KPHAdapter) post(ctx context.Context, params map[string]interface{}, host string, extraParams map[string]string, context string) (map[string]interface{}, error) {
 	all := make(url.Values)
 	for k, v := range _BASE_PARAMS {
 		all[k] = v
@@ -726,7 +726,7 @@ func (a *KPHAdapter) post(params map[string]interface{}, host string, extraParam
 	}
 
 	body := all.Encode()
-	req, err := http.NewRequest("POST", host, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, host, strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("%s request failed: %w", context, err)
 	}

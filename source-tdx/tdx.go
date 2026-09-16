@@ -16,8 +16,8 @@ import (
 // TDX (通达信) 7709 binary protocol constants from upstream axdata_source_tdx.
 const (
 	// Request frame
-	REQ_PREFIX       byte   = 0x0C
-	REQ_HEADER_SIZE  uint32 = 13
+	REQ_PREFIX      byte   = 0x0C
+	REQ_HEADER_SIZE uint32 = 13
 
 	// Response frame
 	RES_HEADER_SIZE uint32 = 16 // 4 (prefix) + 12
@@ -60,30 +60,30 @@ var (
 
 // Record sizes (from upstream _command_layouts).
 const (
-	CODE_RECORD_SIZE   = 37
-	FINANCE_BODY_SIZE  = 136
+	CODE_RECORD_SIZE    = 37
+	FINANCE_BODY_SIZE   = 136
 	AUCTION_RECORD_SIZE = 16
 )
 
 // Request command codes (from upstream _command_codes.py).
 const (
-	CMD_HANDSHAKE               uint16 = 0x000D
-	CMD_HEARTBEAT               uint16 = 0x0004
-	CMD_SECURITY_COUNT          uint16 = 0x044E
-	CMD_SECURITY_LIST           uint16 = 0x044D
-	CMD_PRICE_LIMITS            uint16 = 0x0452
-	CMD_INTRADAY_SUBCHART       uint16 = 0x051B
-	CMD_KLINES                  uint16 = 0x052D
-	CMD_TODAY_INTRADAY          uint16 = 0x0537
-	CMD_LEGACY_QUOTES           uint16 = 0x053E
-	CMD_REFRESH_QUOTES          uint16 = 0x0547
-	CMD_CATEGORY_QUOTES         uint16 = 0x054B
-	CMD_EXPLICIT_QUOTES         uint16 = 0x054C
-	CMD_AUCTION_PROCESS         uint16 = 0x056A
-	CMD_FILE_CONTENT            uint16 = 0x06B9
-	CMD_HISTORICAL_INTRADAY     uint16 = 0x0FB4
-	CMD_TODAY_TRADES            uint16 = 0x0FC5
-	CMD_HISTORICAL_TRADES       uint16 = 0x0FC6
+	CMD_HANDSHAKE                  uint16 = 0x000D
+	CMD_HEARTBEAT                  uint16 = 0x0004
+	CMD_SECURITY_COUNT             uint16 = 0x044E
+	CMD_SECURITY_LIST              uint16 = 0x044D
+	CMD_PRICE_LIMITS               uint16 = 0x0452
+	CMD_INTRADAY_SUBCHART          uint16 = 0x051B
+	CMD_KLINES                     uint16 = 0x052D
+	CMD_TODAY_INTRADAY             uint16 = 0x0537
+	CMD_LEGACY_QUOTES              uint16 = 0x053E
+	CMD_REFRESH_QUOTES             uint16 = 0x0547
+	CMD_CATEGORY_QUOTES            uint16 = 0x054B
+	CMD_EXPLICIT_QUOTES            uint16 = 0x054C
+	CMD_AUCTION_PROCESS            uint16 = 0x056A
+	CMD_FILE_CONTENT               uint16 = 0x06B9
+	CMD_HISTORICAL_INTRADAY        uint16 = 0x0FB4
+	CMD_TODAY_TRADES               uint16 = 0x0FC5
+	CMD_HISTORICAL_TRADES          uint16 = 0x0FC6
 	CMD_RECENT_HISTORICAL_INTRADAY uint16 = 0x0FEB
 )
 
@@ -96,14 +96,14 @@ const (
 
 // Kline period codes (from upstream klines.py PERIOD_ALIASES).
 const (
-	PERIOD_5M     = 0
-	PERIOD_15M    = 1
-	PERIOD_30M    = 2
-	PERIOD_60M    = 3
-	PERIOD_DAILY  = 4
-	PERIOD_WEEKLY = 5
+	PERIOD_5M      = 0
+	PERIOD_15M     = 1
+	PERIOD_30M     = 2
+	PERIOD_60M     = 3
+	PERIOD_DAILY   = 4
+	PERIOD_WEEKLY  = 5
 	PERIOD_MONTHLY = 6
-	PERIOD_1M     = 7
+	PERIOD_1M      = 7
 	PERIOD_NMINUTE = 8 // custom n-minute
 	PERIOD_NDAY    = 9
 	PERIOD_QUARTER = 10
@@ -114,8 +114,8 @@ const (
 // PeriodParam is the second part of the kline period pair.
 // Most standard periods use 1; custom N-minute/NDAY/NSECOND use the value.
 type PeriodPair struct {
-	Period       uint16
-	PeriodParam  uint16
+	Period      uint16
+	PeriodParam uint16
 }
 
 // Quote level for bid/ask
@@ -126,11 +126,11 @@ type QuoteLevel struct {
 
 // SecurityCode is one row from the security list.
 type SecurityCode struct {
-	Code        string
-	Multiple    uint16
-	Name        string
-	Decimal     byte
-	PrevClose   float32
+	Code         string
+	Multiple     uint16
+	Name         string
+	Decimal      byte
+	PrevClose    float32
 	VolRatioBase float32
 }
 
@@ -172,10 +172,10 @@ type LegacyQuote struct {
 
 // FinanceInfo row
 type FinanceInfo struct {
-	Code    string
-	Name    string
+	Code      string
+	Name      string
 	PrevClose float32
-	Data    []byte // body[FINANCE_BODY_SIZE] for external field mapping
+	Data      []byte // body[FINANCE_BODY_SIZE] for external field mapping
 }
 
 // WireRequest is a TDX command request.
@@ -186,10 +186,10 @@ type WireRequest struct {
 
 // WireResponse is a parsed TDX command response.
 type WireResponse struct {
-	Command  uint16
-	MsgID    uint32
-	Data     []byte
-	RawData  []byte
+	Command uint16
+	MsgID   uint32
+	Data    []byte
+	RawData []byte
 }
 
 // Adapter implements TDX source requests.
@@ -202,11 +202,11 @@ type Adapter interface {
 
 // TDXAdapter is a real 7709 TCP adapter with multi-server failover.
 type TDXAdapter struct {
-	hosts        []string
-	timeout      int   // per-server connection timeout (seconds)
-	msgID        uint32
-	description  string
-	maxDuration  int   // max total seconds across all host attempts
+	hosts       []string
+	timeout     int // per-server connection timeout (seconds)
+	msgID       uint32
+	description string
+	maxDuration int // max total seconds across all host attempts
 }
 
 // NewTDXAdapter creates an adapter with explicit host list.
@@ -258,7 +258,7 @@ func envHostList(key string) []string {
 	return hosts
 }
 
-func (a *TDXAdapter) Name() string { return "tdx" }
+func (a *TDXAdapter) Name() string        { return "tdx" }
 func (a *TDXAdapter) Description() string { return a.description }
 
 // ─── Request dispatch ───────────────────────────────────────────────────
@@ -493,9 +493,18 @@ func encodeRequest(req *WireRequest) ([]byte, error) {
 	return buf, nil
 }
 
+// errUnimplemented is returned by every TDX request. The adapter's wire
+// encoding, session handshake and zlib decompression are only partially
+// written: buildRequest can emit a frame, but nothing can decode the reply, so
+// no request can ever succeed. The error names the adapter rather than failing
+// silently or hanging until the connection timeout.
+var errUnimplemented = errors.New(
+	"tdx adapter is not implemented: the wire response decoder is missing, " +
+		"so requests cannot be completed; use a different source adapter")
+
 // readRawResponse reads one TDX response frame from a connection.
 func readRawResponse(conn net.Conn) (*WireResponse, error) {
-	return nil, errors.New("readRawResponse: stub")
+	return nil, errUnimplemented
 }
 
 // buildQuotesRequest builds a quote fetch request.
@@ -764,7 +773,7 @@ func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{
 		}
 		market := data[pos]
 		code := ascii2str(data[pos+1 : pos+7])
-		active1 := binary.LittleEndian.Uint16(data[pos+7:pos+9])
+		active1 := binary.LittleEndian.Uint16(data[pos+7 : pos+9])
 		pos += 9
 
 		closeRaw, pos := varint(data, pos)
@@ -818,23 +827,23 @@ func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{
 
 		marketStr := marketToExchange(int(market))
 		rows = append(rows, map[string]interface{}{
-			"instrument_id": code + "." + marketStr,
-			"symbol":        code,
-			"tdx_code":      marketToCode(int(market)) + code,
-			"exchange":      marketStr,
-			"open":          open,
-			"close":         close,
-			"high":          high,
-			"low":           low,
-			"pre_close":     preClose,
-			"total_volume":  int(totalHand),
+			"instrument_id":  code + "." + marketStr,
+			"symbol":         code,
+			"tdx_code":       marketToCode(int(market)) + code,
+			"exchange":       marketStr,
+			"open":           open,
+			"close":          close,
+			"high":           high,
+			"low":            low,
+			"pre_close":      preClose,
+			"total_volume":   int(totalHand),
 			"current_volume": int(currentHand),
-			"amount_raw":    int(amountRaw),
-			"inside_dish":   insideDish,
-			"outer_disc":    outerDisc,
-			"bid_vol_sum":   bidVolSum,
-			"ask_vol_sum":   askVolSum,
-			"active1":       int(active1),
+			"amount_raw":     int(amountRaw),
+			"inside_dish":    insideDish,
+			"outer_disc":     outerDisc,
+			"bid_vol_sum":    bidVolSum,
+			"ask_vol_sum":    askVolSum,
+			"active1":        int(active1),
 		})
 	}
 	return rows, nil
@@ -856,7 +865,7 @@ func parseCategoryQuoteRows(resp *WireResponse) ([]map[string]interface{}, error
 		}
 		market := data[pos]
 		code := ascii2str(data[pos+1 : pos+7])
-		active1 := binary.LittleEndian.Uint16(data[pos+7:pos+9])
+		active1 := binary.LittleEndian.Uint16(data[pos+7 : pos+9])
 		pos += 9
 
 		closeRaw, pos := varint(data, pos)
@@ -899,23 +908,23 @@ func parseCategoryQuoteRows(resp *WireResponse) ([]map[string]interface{}, error
 
 		marketStr := marketToExchange(int(market))
 		rows = append(rows, map[string]interface{}{
-			"instrument_id": code + "." + marketStr,
-			"symbol":        code,
-			"tdx_code":      marketToCode(int(market)) + code,
-			"exchange":      marketStr,
-			"open":          open,
-			"close":         close,
-			"high":          high,
-			"low":           low,
-			"pre_close":     preClose,
-			"total_volume":  int(totalHand),
+			"instrument_id":  code + "." + marketStr,
+			"symbol":         code,
+			"tdx_code":       marketToCode(int(market)) + code,
+			"exchange":       marketStr,
+			"open":           open,
+			"close":          close,
+			"high":           high,
+			"low":            low,
+			"pre_close":      preClose,
+			"total_volume":   int(totalHand),
 			"current_volume": int(currentHand),
-			"amount_raw":    int(amountRaw),
-			"active1":       int(active1),
-			"bid1_price":    float64(closeRaw+bid1Diff) / 100.0,
-			"bid1_volume":   int(bid1Vol),
-			"ask1_price":    float64(closeRaw+ask1Diff) / 100.0,
-			"ask1_volume":   int(ask1Vol),
+			"amount_raw":     int(amountRaw),
+			"active1":        int(active1),
+			"bid1_price":     float64(closeRaw+bid1Diff) / 100.0,
+			"bid1_volume":    int(bid1Vol),
+			"ask1_price":     float64(closeRaw+ask1Diff) / 100.0,
+			"ask1_volume":    int(ask1Vol),
 		})
 	}
 	return rows, nil
@@ -965,19 +974,19 @@ func parseKlineRows(resp *WireResponse) ([]map[string]interface{}, error) {
 		}
 
 		rows = append(rows, map[string]interface{}{
-			"trade_date":     timeRaw,
-			"open":           float64(open) / 1000.0,
-			"high":           float64(high) / 1000.0,
-			"low":            float64(low) / 1000.0,
-			"close":          float64(close) / 1000.0,
-			"volume":         int(volumeRaw),
-			"amount":         compactFloat(int(volumeRaw)), // amount encoded as compact float
-			"volume_raw":     int(volumeRaw),
-			"amount_raw":     int(amountRaw),
-			"open_delta":     int(openDelta),
-			"close_delta":    int(closeDelta),
-			"high_delta":     int(highDelta),
-			"low_delta":      int(lowDelta),
+			"trade_date":  timeRaw,
+			"open":        float64(open) / 1000.0,
+			"high":        float64(high) / 1000.0,
+			"low":         float64(low) / 1000.0,
+			"close":       float64(close) / 1000.0,
+			"volume":      int(volumeRaw),
+			"amount":      compactFloat(int(volumeRaw)), // amount encoded as compact float
+			"volume_raw":  int(volumeRaw),
+			"amount_raw":  int(amountRaw),
+			"open_delta":  int(openDelta),
+			"close_delta": int(closeDelta),
+			"high_delta":  int(highDelta),
+			"low_delta":   int(lowDelta),
 		})
 	}
 	return rows, nil
@@ -995,8 +1004,8 @@ func parsePriceLimitsRows(resp *WireResponse) ([]map[string]interface{}, error) 
 	for i := 0; i < count && pos+13 <= len(data); i++ {
 		code := ascii2str(data[pos+1 : pos+7])
 		// price limit record is 13 bytes
-		upLimit := binary.LittleEndian.Uint32(data[pos+7:pos+11])
-		dnLimit := binary.LittleEndian.Uint32(data[pos+11:pos+13])
+		upLimit := binary.LittleEndian.Uint32(data[pos+7 : pos+11])
+		dnLimit := binary.LittleEndian.Uint32(data[pos+11 : pos+13])
 		pos += 13
 		rows = append(rows, map[string]interface{}{
 			"symbol":      code,
@@ -1105,51 +1114,51 @@ func compactFloat(value int) float64 {
 
 func commandFromString(name string) (uint16, error) {
 	m := map[string]uint16{
-		"handshake":              CMD_HANDSHAKE,
-		"heartbeat":              CMD_HEARTBEAT,
-		"security_count":         CMD_SECURITY_COUNT,
-		"security_list":          CMD_SECURITY_LIST,
-		"price_limits":           CMD_PRICE_LIMITS,
-		"intraday_subchart":      CMD_INTRADAY_SUBCHART,
-		"kline":                  CMD_KLINES,
-		"kline_daily":            CMD_KLINES,
-		"kline_weekly":           CMD_KLINES,
-		"kline_monthly":          CMD_KLINES,
-		"stock_kline_daily_tdx":  CMD_KLINES,
-		"stock_kline_weekly_tdx": CMD_KLINES,
-		"stock_kline_monthly_tdx": CMD_KLINES,
-		"index_kline_tdx":        CMD_KLINES,
-		"etf_kline_tdx":          CMD_KLINES,
-		"today_intraday":         CMD_TODAY_INTRADAY,
-		"legacy_quotes":          CMD_LEGACY_QUOTES,
-		"refresh_quotes":         CMD_REFRESH_QUOTES,
-		"category_quotes":        CMD_CATEGORY_QUOTES,
-		"explicit_quotes":        CMD_EXPLICIT_QUOTES,
-		"stock_realtime_snapshot_tdx": CMD_LEGACY_QUOTES,
-		"auction_process":        CMD_AUCTION_PROCESS,
-		"etf_auction_process_tdx": CMD_AUCTION_PROCESS,
-		"stock_auction_process_tdx": CMD_AUCTION_PROCESS,
-		"file_content":           CMD_FILE_CONTENT,
-		"stock_finance_summary_tdx": CMD_FILE_CONTENT,
-		"stock_finance_profile_tdx": CMD_FILE_CONTENT,
-		"stock_balance_summary_tdx": CMD_FILE_CONTENT,
+		"handshake":                         CMD_HANDSHAKE,
+		"heartbeat":                         CMD_HEARTBEAT,
+		"security_count":                    CMD_SECURITY_COUNT,
+		"security_list":                     CMD_SECURITY_LIST,
+		"price_limits":                      CMD_PRICE_LIMITS,
+		"intraday_subchart":                 CMD_INTRADAY_SUBCHART,
+		"kline":                             CMD_KLINES,
+		"kline_daily":                       CMD_KLINES,
+		"kline_weekly":                      CMD_KLINES,
+		"kline_monthly":                     CMD_KLINES,
+		"stock_kline_daily_tdx":             CMD_KLINES,
+		"stock_kline_weekly_tdx":            CMD_KLINES,
+		"stock_kline_monthly_tdx":           CMD_KLINES,
+		"index_kline_tdx":                   CMD_KLINES,
+		"etf_kline_tdx":                     CMD_KLINES,
+		"today_intraday":                    CMD_TODAY_INTRADAY,
+		"legacy_quotes":                     CMD_LEGACY_QUOTES,
+		"refresh_quotes":                    CMD_REFRESH_QUOTES,
+		"category_quotes":                   CMD_CATEGORY_QUOTES,
+		"explicit_quotes":                   CMD_EXPLICIT_QUOTES,
+		"stock_realtime_snapshot_tdx":       CMD_LEGACY_QUOTES,
+		"auction_process":                   CMD_AUCTION_PROCESS,
+		"etf_auction_process_tdx":           CMD_AUCTION_PROCESS,
+		"stock_auction_process_tdx":         CMD_AUCTION_PROCESS,
+		"file_content":                      CMD_FILE_CONTENT,
+		"stock_finance_summary_tdx":         CMD_FILE_CONTENT,
+		"stock_finance_profile_tdx":         CMD_FILE_CONTENT,
+		"stock_balance_summary_tdx":         CMD_FILE_CONTENT,
 		"stock_profit_cashflow_summary_tdx": CMD_FILE_CONTENT,
-		"stock_finance_profile":  CMD_FILE_CONTENT,
-		"stock_share_capital_tdx": CMD_FILE_CONTENT,
-		"stock_daily_share_tdx":   CMD_FILE_CONTENT,
-		"stock_suspensions_tdx":   CMD_SECURITY_LIST,
-		"stock_codes_tdx":         CMD_SECURITY_LIST,
-		"stock_st_list_tdx":       CMD_SECURITY_LIST,
-		"stock_limit_ladder_tdx":  CMD_CATEGORY_QUOTES,
-		"stock_theme_strength_rank_tdx": CMD_CATEGORY_QUOTES,
-		"historical_intraday":    CMD_HISTORICAL_INTRADAY,
-		"today_trades":           CMD_TODAY_TRADES,
-		"historical_trades":      CMD_HISTORICAL_TRADES,
-		"recent_historical_intraday": CMD_RECENT_HISTORICAL_INTRADAY,
-		"stock_intraday_today_tdx": CMD_TODAY_INTRADAY,
-		"stock_intraday_history_tdx": CMD_HISTORICAL_INTRADAY,
-		"stock_trades_today_tdx": CMD_TODAY_TRADES,
-		"stock_trades_history_tdx": CMD_HISTORICAL_TRADES,
+		"stock_finance_profile":             CMD_FILE_CONTENT,
+		"stock_share_capital_tdx":           CMD_FILE_CONTENT,
+		"stock_daily_share_tdx":             CMD_FILE_CONTENT,
+		"stock_suspensions_tdx":             CMD_SECURITY_LIST,
+		"stock_codes_tdx":                   CMD_SECURITY_LIST,
+		"stock_st_list_tdx":                 CMD_SECURITY_LIST,
+		"stock_limit_ladder_tdx":            CMD_CATEGORY_QUOTES,
+		"stock_theme_strength_rank_tdx":     CMD_CATEGORY_QUOTES,
+		"historical_intraday":               CMD_HISTORICAL_INTRADAY,
+		"today_trades":                      CMD_TODAY_TRADES,
+		"historical_trades":                 CMD_HISTORICAL_TRADES,
+		"recent_historical_intraday":        CMD_RECENT_HISTORICAL_INTRADAY,
+		"stock_intraday_today_tdx":          CMD_TODAY_INTRADAY,
+		"stock_intraday_history_tdx":        CMD_HISTORICAL_INTRADAY,
+		"stock_trades_today_tdx":            CMD_TODAY_TRADES,
+		"stock_trades_history_tdx":          CMD_HISTORICAL_TRADES,
 	}
 	cmd, ok := m[name]
 	if !ok {
@@ -1160,13 +1169,13 @@ func commandFromString(name string) (uint16, error) {
 
 func periodPairForInterface(iface string, params map[string]interface{}) PeriodPair {
 	spec := map[string]PeriodPair{
-		"kline_daily":            {PERIOD_DAILY, 1},
-		"stock_kline_daily_tdx":  {PERIOD_DAILY, 1},
-		"index_kline_tdx":        {PERIOD_DAILY, 1},
-		"etf_kline_tdx":          {PERIOD_DAILY, 1},
-		"kline_weekly":           {PERIOD_WEEKLY, 1},
-		"stock_kline_weekly_tdx": {PERIOD_WEEKLY, 1},
-		"kline_monthly":          {PERIOD_MONTHLY, 1},
+		"kline_daily":             {PERIOD_DAILY, 1},
+		"stock_kline_daily_tdx":   {PERIOD_DAILY, 1},
+		"index_kline_tdx":         {PERIOD_DAILY, 1},
+		"etf_kline_tdx":           {PERIOD_DAILY, 1},
+		"kline_weekly":            {PERIOD_WEEKLY, 1},
+		"stock_kline_weekly_tdx":  {PERIOD_WEEKLY, 1},
+		"kline_monthly":           {PERIOD_MONTHLY, 1},
 		"stock_kline_monthly_tdx": {PERIOD_MONTHLY, 1},
 	}
 	if p, ok := spec[iface]; ok {
@@ -1175,16 +1184,16 @@ func periodPairForInterface(iface string, params map[string]interface{}) PeriodP
 	// Fallback: check period param
 	period := strval(params, "period", "day")
 	pmap := map[string]PeriodPair{
-		"day":       {PERIOD_DAILY, 1},
-		"week":      {PERIOD_WEEKLY, 1},
-		"month":     {PERIOD_MONTHLY, 1},
-		"quarter":   {PERIOD_QUARTER, 1},
-		"year":      {PERIOD_YEARLY, 1},
-		"1m":        {PERIOD_1M, 1},
-		"5m":        {PERIOD_5M, 1},
-		"15m":       {PERIOD_15M, 1},
-		"30m":       {PERIOD_30M, 1},
-		"60m":       {PERIOD_60M, 1},
+		"day":     {PERIOD_DAILY, 1},
+		"week":    {PERIOD_WEEKLY, 1},
+		"month":   {PERIOD_MONTHLY, 1},
+		"quarter": {PERIOD_QUARTER, 1},
+		"year":    {PERIOD_YEARLY, 1},
+		"1m":      {PERIOD_1M, 1},
+		"5m":      {PERIOD_5M, 1},
+		"15m":     {PERIOD_15M, 1},
+		"30m":     {PERIOD_30M, 1},
+		"60m":     {PERIOD_60M, 1},
 	}
 	if p, ok := pmap[period]; ok {
 		return p
@@ -1277,7 +1286,10 @@ func marketToExchange(market int) string {
 	}
 }
 
-func normalizeSecurities(params map[string]interface{}) []struct{ market byte; code string } {
+func normalizeSecurities(params map[string]interface{}) []struct {
+	market byte
+	code   string
+} {
 	m := strval(params, "market", "sz")
 	c := strval(params, "code", "")
 	if c == "" {
@@ -1286,9 +1298,15 @@ func normalizeSecurities(params map[string]interface{}) []struct{ market byte; c
 	market := marketFromString(m)
 	// Split comma-separated codes
 	codes := splitCSV(c)
-	var secs []struct{ market byte; code string }
+	var secs []struct {
+		market byte
+		code   string
+	}
 	for _, cd := range codes {
-		secs = append(secs, struct{ market byte; code string }{market: market, code: cd})
+		secs = append(secs, struct {
+			market byte
+			code   string
+		}{market: market, code: cd})
 	}
 	return secs
 }

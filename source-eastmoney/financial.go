@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -185,7 +186,9 @@ func (a *EastMoneyAdapter) requestBusinessScope(ctx context.Context, params map[
 	}
 
 	emCode := hsf10Code(code)
-	u := EASTMONEY_HSF10_BUSINESS_URL + "?code=" + emCode
+	// The code is a caller-supplied instrument id interpolated into a URL, so it
+	// must be escaped or a value like "600519&x=1" injects an extra parameter.
+	u := EASTMONEY_HSF10_BUSINESS_URL + "?code=" + url.QueryEscape(emCode)
 	data, err := a.httpGet(ctx, u, "https://emweb.securities.eastmoney.com/")
 	if err != nil {
 		return nil, fmt.Errorf("business scope request: %w", err)

@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +69,232 @@ func TestStorageAppend(t *testing.T) {
 	t.Log("Append succeeded")
 }
 
+// TestAppendPreservesExistingRows reproduces the append regression: the writer
+// reopened the file without O_TRUNC or O_APPEND and rewrote from offset zero,
+// leaving overlapping parquet footers. The file still existed and the count
+// metadata was right, but neither parquet-go nor DuckDB could open it. The
+// original TestStorageAppend only checked that Append returned nil, which this
+// bug satisfied.
+func TestAppendPreservesExistingRows(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-store-append-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	store := NewStore(config.DefaultConfig(tmpDir))
+
+	batches := [][]interface{}{
+		{
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-10", Close: 10.5},
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-11", Close: 11.0},
+		},
+		{
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-12", Close: 11.5},
+		},
+		{
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-15", Close: 12.0},
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-16", Close: 12.5},
+			schema.DailyRecord{TsCode: "000001.SZ", TradeDate: "2024-01-17", Close: 13.0},
+		},
+	}
+
+	for i, batch := range batches {
+		err := store.Append("core", "daily", batch)
+		if err != nil {
+			t.Fatalf("append %d failed: %v", i, err)
+		}
+	}
+
+	path := filepath.Join(tmpDir, "data/core/daily.parquet")
+	wantRows := 6
+	got, numRows, err := readDailyRows(path)
+	if err != nil {
+		t.Fatalf("parquet file unreadable after %d appends: %v", len(batches), err)
+	}
+	if numRows != wantRows {
+		t.Fatalf("NumRows = %d, want %d", numRows, wantRows)
+	}
+	if len(got) != wantRows {
+		t.Fatalf("read back %d rows, want %d", len(got), wantRows)
+	}
+
+	want := map[string]float64{
+		"2024-01-10": 10.5, "2024-01-11": 11.0, "2024-01-12": 11.5,
+		"2024-01-15": 12.0, "2024-01-16": 12.5, "2024-01-17": 13.0,
+	}
+	seen := make(map[string]float64, len(got))
+	for _, r := range got {
+		if r.TsCode == "" {
+			t.Errorf("row %v has empty ts_code", r)
+		}
+		seen[r.TradeDate] = r.Close
+	}
+	for date, closePrice := range want {
+		if seen[date] != closePrice {
+			t.Errorf("close[%s] = %v, want %v", date, seen[date], closePrice)
+		}
+	}
+
+	count, err := store.Count("core", "daily")
+	if err != nil {
+		t.Fatalf("Count failed: %v", err)
+	}
+	if count != wantRows {
+		t.Errorf("Count = %d, want %d", count, wantRows)
+	}
+}
+
+// TestWriteTypedStructSurvivesWrite covers the typed input path: records that
+// arrive as schema structs rather than maps used to be flattened through a
+// map[string]interface{} assertion that only accepted maps, so every field read
+// back as "" or 0. Map input was unaffected, which is why this never surfaced.
+func TestWriteTypedStructSurvivesWrite(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-store-typed-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	store := NewStore(config.DefaultConfig(tmpDir))
+
+	rec := schema.DailyRecord{
+		TsCode: "600519.SH", TradeDate: "2024-06-28",
+		Open: 1258.0, High: 1269.0, Low: 1249.0, Close: 1258.0,
+		Vol: 31000, Amount: 3.9e10,
+	}
+	if err := store.Write("core", "daily", []interface{}{rec}); err != nil {
+		t.Fatalf("Write failed: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "data/core/daily.parquet")
+	got, _, err := readDailyRows(path)
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("rows = %d, want 1", len(got))
+	}
+	r := got[0]
+	if r.TsCode != rec.TsCode {
+		t.Errorf("TsCode = %q, want %q", r.TsCode, rec.TsCode)
+	}
+	if r.TradeDate != rec.TradeDate {
+		t.Errorf("TradeDate = %q, want %q", r.TradeDate, rec.TradeDate)
+	}
+	if r.Close != rec.Close {
+		t.Errorf("Close = %v, want %v", r.Close, rec.Close)
+	}
+	if r.Amount != rec.Amount {
+		t.Errorf("Amount = %v, want %v", r.Amount, rec.Amount)
+	}
+}
+
+// TestUpsertByKeyReplacesInsteadOfDuplicates verifies upsert semantics on a
+// table whose registry declares upsert_by_key: a second batch carrying the same
+// primary key must overwrite the earlier row instead of duplicating it. stock
+// basic is the only typed table with this mode, keyed by instrument_id.
+func TestUpsertByKeyReplacesInsteadOfDuplicates(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-store-upsert-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	store := NewStore(config.DefaultConfig(tmpDir))
+
+	first := []interface{}{
+		schema.StockBasicRecord{InstrumentID: "600519.SH", Name: "Kweichow Moutai", Industry: "Liquor"},
+		schema.StockBasicRecord{InstrumentID: "000858.SZ", Name: "Wuliangye", Industry: "Liquor"},
+		schema.StockBasicRecord{InstrumentID: "000001.SZ", Name: "Ping An Bank", Industry: "Banking"},
+	}
+	if err := store.Append("core", "stock_basic_exchange", first); err != nil {
+		t.Fatalf("first append failed: %v", err)
+	}
+
+	updated := []interface{}{
+		schema.StockBasicRecord{InstrumentID: "600519.SH", Name: "Kweichow Moutai", Industry: "Baijiu"},
+		schema.StockBasicRecord{InstrumentID: "300750.SZ", Name: "CATL", Industry: "Batteries"},
+	}
+	if err := store.Append("core", "stock_basic_exchange", updated); err != nil {
+		t.Fatalf("second append failed: %v", err)
+	}
+
+	path := filepath.Join(tmpDir, "data/core/stock_basic_exchange.parquet")
+	got, err := readStockBasicRows(path)
+	if err != nil {
+		t.Fatalf("read back failed: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("rows = %d, want 4 (3 initial plus 1 new key)", len(got))
+	}
+
+	byID := make(map[string]schema.StockBasicRecord, len(got))
+	for _, r := range got {
+		byID[r.InstrumentID] = r
+	}
+	if got := byID["600519.SH"].Industry; got != "Baijiu" {
+		t.Errorf("upserted industry = %q, want %q", got, "Baijiu")
+	}
+	if got := byID["000858.SZ"].Name; got != "Wuliangye" {
+		t.Errorf("untouched name = %q, want %q", got, "Wuliangye")
+	}
+	if _, ok := byID["300750.SZ"]; !ok {
+		t.Error("new key 300750.SZ missing after upsert")
+	}
+
+	count, err := store.Count("core", "stock_basic_exchange")
+	if err != nil {
+		t.Fatalf("Count failed: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("Count = %d, want 4", count)
+	}
+}
+
+// readStockBasicRows decodes every row of a stock_basic_exchange file.
+func readStockBasicRows(path string) ([]schema.StockBasicRecord, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	r := parquet.NewReader(f)
+	defer r.Close()
+
+	n := int(r.NumRows())
+	rows := make([]schema.StockBasicRecord, 0, n)
+	for {
+		rec := schema.StockBasicRecord{}
+		if err := r.Read(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				return rows, nil
+			}
+			return nil, err
+		}
+		rows = append(rows, rec)
+	}
+}
+
+// readDailyRows reads every row of a daily parquet file back through parquet-go,
+// returning both the decoded records and the file's own row count.
+func readDailyRows(path string) ([]schema.DailyRecord, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+
+	r := parquet.NewReader(f)
+	defer r.Close()
+
+	n := int(r.NumRows())
+	rows := make([]schema.DailyRecord, 0, n)
+	for {
+		rec := schema.DailyRecord{}
+		if err := r.Read(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				return rows, n, nil
+			}
+			return nil, n, err
+		}
+		rows = append(rows, rec)
+	}
+}
+
+// survive a read back with every column intact. Without a typed conversion case
 // TestSnapshotRoundTrip ensures snapshot tables written from generic map records
 // survive a read back with every column intact. Without a typed conversion case
 // per table, parquet-go collapses a Go map into a single blob column and all

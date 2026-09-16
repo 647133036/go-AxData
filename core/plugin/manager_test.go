@@ -8,20 +8,57 @@ import (
 )
 
 func TestNewPluginManager(t *testing.T) {
-	pm := NewPluginManager("/tmp/test-plugins")
+	pm := NewPluginManager(filepath.Join("/tmp/test-plugins", "plugins.json"))
 	if pm.plugins == nil {
 		t.Fatal("plugins map should not be nil")
 	}
 	if pm.providers == nil {
 		t.Fatal("providers map should not be nil")
 	}
-	if pm.installDir != "/tmp/test-plugins" {
-		t.Fatalf("installDir: got %s, want /tmp/test-plugins", pm.installDir)
+	want := filepath.Join("/tmp/test-plugins", "plugins.json")
+	if pm.metadataPath != want {
+		t.Fatalf("metadataPath: got %s, want %s", pm.metadataPath, want)
+	}
+}
+
+// TestPluginManagerSaveLoadRoundTrip proves Save and Load agree on the same file.
+// The metadata argument is a full plugins.json path; joining plugins.json onto
+// it again produced <root>/metadata/plugins.json/plugins.json, which does not
+// exist, so Load silently returned an empty set and every Save wrote a file no
+// one ever read.
+func TestPluginManagerSaveLoadRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	providerPath := filepath.Join(tmpDir, "metadata", "plugins.json")
+
+	src := NewPluginManager(providerPath)
+	src.RegisterProvider(newMockProvider("axdata.source.mock", "mock"))
+	src.RegisterProvider(newMockProvider("axdata.source.tencent", "tencent"))
+	if err := src.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	if _, err := os.Stat(providerPath); err != nil {
+		t.Fatalf("metadata not written to %s: %v", providerPath, err)
+	}
+
+	fresh := NewPluginManager(providerPath)
+	if err := fresh.Load(); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if _, ok := fresh.Get("axdata.source.mock"); !ok {
+		t.Error("mock plugin missing after reload")
+	}
+	if _, ok := fresh.Get("axdata.source.tencent"); !ok {
+		t.Error("tencent plugin missing after reload")
+	}
+	if got := len(fresh.List()); got != 2 {
+		t.Errorf("plugins = %d, want 2", got)
 	}
 }
 
 func TestPluginManager_RegisterProvider(t *testing.T) {
-	pm := NewPluginManager("/tmp/test-plugins")
+	pm := NewPluginManager(filepath.Join("/tmp/test-plugins", "plugins.json"))
 	p := newMockProvider("axdata.source.mock", "mock")
 	pm.RegisterProvider(p)
 
@@ -46,7 +83,7 @@ func TestPluginManager_RegisterProvider(t *testing.T) {
 }
 
 func TestPluginManager_Get(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	p := newMockProvider("axdata.source.mock", "mock")
 	pm.RegisterProvider(p)
 
@@ -65,7 +102,7 @@ func TestPluginManager_Get(t *testing.T) {
 }
 
 func TestPluginManager_List(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 	pm.RegisterProvider(newMockProvider("p2", "src2"))
 
@@ -76,7 +113,7 @@ func TestPluginManager_List(t *testing.T) {
 }
 
 func TestPluginManager_ListEnabled(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 	pm.RegisterProvider(newMockProvider("p2", "src2"))
 
@@ -94,15 +131,15 @@ func TestPluginManager_InstallAndUninstall(t *testing.T) {
 	os.MkdirAll(pluginDir, 0755)
 
 	manifest := map[string]interface{}{
-		"id":       "test.plugin",
-		"name":     "Test Plugin",
-		"version":  "1.0.0",
+		"id":         "test.plugin",
+		"name":       "Test Plugin",
+		"version":    "1.0.0",
 		"interfaces": []string{"iface1", "iface2"},
 	}
 	data, _ := json.MarshalIndent(manifest, "", "  ")
 	os.WriteFile(filepath.Join(pluginDir, "plugin.json"), data, 0644)
 
-	pm := NewPluginManager(tmpDir)
+	pm := NewPluginManager(filepath.Join(tmpDir, "plugins.json"))
 
 	err := pm.Install(pluginDir)
 	if err != nil {
@@ -138,7 +175,7 @@ func TestPluginManager_InstallAndUninstall(t *testing.T) {
 
 func TestPluginManager_EnableDisable(t *testing.T) {
 	tmpDir := t.TempDir()
-	pm := NewPluginManager(tmpDir)
+	pm := NewPluginManager(filepath.Join(tmpDir, "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 
 	plugin, _ := pm.Get("p1")
@@ -175,7 +212,7 @@ func TestPluginManager_EnableDisable(t *testing.T) {
 }
 
 func TestPluginManager_GetInterface(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 
 	iface, ok := pm.GetInterface("test_iface")
@@ -193,7 +230,7 @@ func TestPluginManager_GetInterface(t *testing.T) {
 }
 
 func TestPluginManager_GetEnabledAdapter(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 
 	adapter := pm.GetEnabledAdapter("src1")
@@ -218,7 +255,7 @@ func TestPluginManager_GetEnabledAdapter(t *testing.T) {
 }
 
 func TestPluginManager_ListProviders(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 	pm.RegisterProvider(newMockProvider("p2", "src2"))
 
@@ -229,7 +266,7 @@ func TestPluginManager_ListProviders(t *testing.T) {
 }
 
 func TestPluginManager_GetProvider(t *testing.T) {
-	pm := NewPluginManager("/tmp/test")
+	pm := NewPluginManager(filepath.Join("/tmp/test", "plugins.json"))
 	pm.RegisterProvider(newMockProvider("p1", "src1"))
 
 	provider, ok := pm.GetProvider("p1")
@@ -248,7 +285,7 @@ func TestPluginManager_GetProvider(t *testing.T) {
 
 func TestPluginManager_SaveAndLoad(t *testing.T) {
 	tmpDir := t.TempDir()
-	pm := NewPluginManager(tmpDir)
+	pm := NewPluginManager(filepath.Join(tmpDir, "plugins.json"))
 
 	provider := newMockProvider("p1", "src1")
 	pm.RegisterProvider(provider)
@@ -256,7 +293,7 @@ func TestPluginManager_SaveAndLoad(t *testing.T) {
 	// Disable to verify Load round-trip
 	_ = pm.Disable("p1")
 
-	pm2 := NewPluginManager(tmpDir)
+	pm2 := NewPluginManager(filepath.Join(tmpDir, "plugins.json"))
 	err := pm2.Load()
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)

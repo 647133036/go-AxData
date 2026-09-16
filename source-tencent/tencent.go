@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	TencentQuoteURL   = "https://qt.gtimg.cn/q=%s"
-	TencentBoardRank  = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
-	TencentKlineURL   = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
-	TencentTickURL    = "http://stock.gtimg.cn/data/index.php"
-	TencentStartYear  = "https://web.ifzq.gtimg.cn/other/klineweb/klineWeb/weekTrends"
+	TencentQuoteURL  = "https://qt.gtimg.cn/q=%s"
+	TencentBoardRank = "https://proxy.finance.qq.com/cgi/cgi-bin/rank/hs/getBoardRankList"
+	TencentKlineURL  = "https://proxy.finance.qq.com/ifzqgtimg/appstock/app/newfqkline/get"
+	TencentTickURL   = "http://stock.gtimg.cn/data/index.php"
+	TencentStartYear = "https://web.ifzq.gtimg.cn/other/klineweb/klineWeb/weekTrends"
 )
 
 type adapter struct {
@@ -85,14 +85,14 @@ func (a *adapter) requestSpot(ctx context.Context, params map[string]interface{}
 	}
 
 	sortKey := map[string]string{
-		"price": "price",
+		"price":      "price",
 		"change_pct": "zdf",
-		"volume": "volume",
-		"amount": "turnover",
+		"volume":     "volume",
+		"amount":     "turnover",
 	}[sortType]
 
 	paramsMap := map[string]string{
-		"_appver":   "11.17.0",
+		"_appver":    "11.17.0",
 		"board_code": "aStock",
 		"sort_type":  sortKey,
 		"direct":     direction,
@@ -547,10 +547,10 @@ func parseQuotePayload(text string) []map[string]interface{} {
 			continue
 		}
 		parts := strings.Split(raw, "~")
-		if len(parts) < 40 {
+		if len(parts) < 3 {
 			continue
 		}
-		if parts[1] == "" || parts[2] == "" {
+		if quoteField(parts, 1) == "" || quoteField(parts, 2) == "" {
 			continue
 		}
 		result := normalizeQuoteRow(quoteCode, parts)
@@ -562,40 +562,53 @@ func parseQuotePayload(text string) []map[string]interface{} {
 }
 
 // normalizeQuoteRow maps ~-delimited fields to AxData schema.
+//
+// Tencent's quote payload is variable-width: a row can legitimately have as few
+// as 3 fields or as many as 83. Every index above 2 is therefore read through
+// quoteField, which returns "" past the end instead of panicking.
 func normalizeQuoteRow(quoteCode string, parts []string) map[string]interface{} {
-	symbol := parts[2]
+	symbol := quoteField(parts, 2)
 	if symbol == "" {
 		symbol = quoteCode[2:]
 	}
 	exchange := exchangeFromQuoteCode(quoteCode)
 	instrumentID := fmt.Sprintf("%s.%s", symbol, exchangeSuffix(exchange))
-	amount := amountFromCombined(parts[35])
+	amount := amountFromCombined(quoteField(parts, 35))
 
 	return map[string]interface{}{
-		"instrument_id":       instrumentID,
-		"symbol":              symbol,
-		"exchange":            exchange,
-		"asset_type":          assetType(parts[61], symbol),
-		"name":                parts[1],
-		"quote_time":          parts[30],
-		"last_price":          parts[3],
-		"pre_close":           parts[4],
-		"open":                parts[5],
-		"high":                parts[33],
-		"low":                 parts[34],
-		"change":              parts[31],
-		"change_pct":          parts[32],
-		"volume":              parts[36],
-		"amount":              amount,
-		"turnover_rate":       parts[38],
-		"pe_dynamic":          parts[39],
-		"pb":                  parts[46],
-		"total_market_value":  parts[45],
-		"float_market_value":  parts[44],
-		"limit_up_price":      parts[47],
-		"limit_down_price":    parts[48],
-		"currency":            parts[82],
+		"instrument_id":      instrumentID,
+		"symbol":             symbol,
+		"exchange":           exchange,
+		"asset_type":         assetType(quoteField(parts, 61), symbol),
+		"name":               quoteField(parts, 1),
+		"quote_time":         quoteField(parts, 30),
+		"last_price":         quoteField(parts, 3),
+		"pre_close":          quoteField(parts, 4),
+		"open":               quoteField(parts, 5),
+		"high":               quoteField(parts, 33),
+		"low":                quoteField(parts, 34),
+		"change":             quoteField(parts, 31),
+		"change_pct":         quoteField(parts, 32),
+		"volume":             quoteField(parts, 36),
+		"amount":             amount,
+		"turnover_rate":      quoteField(parts, 38),
+		"pe_dynamic":         quoteField(parts, 39),
+		"pb":                 quoteField(parts, 46),
+		"total_market_value": quoteField(parts, 45),
+		"float_market_value": quoteField(parts, 44),
+		"limit_up_price":     quoteField(parts, 47),
+		"limit_down_price":   quoteField(parts, 48),
+		"currency":           quoteField(parts, 82),
 	}
+}
+
+// quoteField reads one field of a quote row, returning "" when the row is
+// shorter than the requested index.
+func quoteField(parts []string, i int) string {
+	if i < 0 || i >= len(parts) {
+		return ""
+	}
+	return parts[i]
 }
 
 // normalizeBoardRankRow maps board rank fields to AxData schema.
@@ -648,7 +661,9 @@ func normalizeKlineRows(arr []interface{}, quoteCode, adjust, assetType string) 
 		if !ok {
 			continue
 		}
-		if len(parts) < 6 {
+		// The row below reads up to parts[8]; skipping only below 6 let a
+		// short row reach parts[8] and panic with index out of range.
+		if len(parts) < 9 {
 			continue
 		}
 		dateStr := dateFromDash(parts[0])

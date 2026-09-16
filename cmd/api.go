@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/electkismet/axdata-go/core/api"
 	"github.com/spf13/cobra"
@@ -32,31 +33,42 @@ func NewAPIServeCmdForServer(server *api.APIServer) *cobra.Command {
 }
 
 func runAPIServeForServer(ctx context.Context, server *api.APIServer, port int) {
-	fmt.Printf("Starting AxData API server on :%d\n", port)
+	fmt.Fprintf(os.Stderr, "Starting AxData API server on :%d\n", port)
 
 	// Build routes
 	mux := http.NewServeMux()
 	server.RegisterRoutes(mux)
 
-	// Graceful shutdown
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// http.ListenAndServe takes no context, so a signal can only interrupt it
+	// by killing the process. An http.Server lets SIGINT/SIGTERM close
+	// in-flight requests and exit cleanly.
+	addr := fmt.Sprintf(":%d", port)
+	srv := &http.Server{Addr: addr, Handler: mux}
 
 	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		select {
 		case <-sigCh:
-			server.Shutdown(ctx)
 		case <-ctx.Done():
-			server.Shutdown(ctx)
 		}
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "API server shutdown error: %v\n", err)
+			if ferr := srv.Close(); ferr != nil {
+				fmt.Fprintf(os.Stderr, "API server close error: %v\n", ferr)
+			}
+		}
+		server.Shutdown(ctx)
 	}()
 
-	addr := fmt.Sprintf(":%d", port)
-	fmt.Printf("AxData API server running at http://localhost%s\n", addr)
+	fmt.Fprintf(os.Stderr, "AxData API server running at http://localhost%s\n", addr)
 
-	if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
-		fmt.Printf("API server error: %v\n", err)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "API server error: %v\n", err)
+		return
 	}
 
-	fmt.Println("API server stopped")
+	fmt.Fprintln(os.Stderr, "API server stopped")
 }

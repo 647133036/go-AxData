@@ -60,8 +60,8 @@ func (p *TencentProvider) Interfaces() []plugin.SourceInterface {
 // CreateAdapter creates a new Tencent adapter instance.
 func (p *TencentProvider) CreateAdapter(options map[string]interface{}) plugin.SourceAdapter {
 	return &TencentAdapter{
-		baseURL:   "https://qt.gtimg.cn",
-		client:    &http.Client{Timeout: 30 * time.Second},
+		baseURL:     "https://qt.gtimg.cn",
+		client:      &http.Client{Timeout: 30 * time.Second},
 		description: "腾讯财经 (Tencent Finance) API adapter - 实时行情与K线数据",
 	}
 }
@@ -198,7 +198,9 @@ func (a *TencentAdapter) parseQuoteString(raw string) ([]map[string]interface{},
 		}
 		data := strings.Trim(parts[1], "\"")
 		fields := strings.Split(data, "~")
-		if len(fields) < 30 {
+		// The record below reads up to fields[33]; a shorter quote line panics
+		// with an index out of range instead of being skipped.
+		if len(fields) < 34 {
 			continue
 		}
 
@@ -206,40 +208,40 @@ func (a *TencentAdapter) parseQuoteString(raw string) ([]map[string]interface{},
 		axCode := tencentCodeToAxCode(code)
 
 		record := map[string]interface{}{
-			"instrument_id":  axCode,
-			"code":           code,
-			"name":           fields[1],
-			"close":          fields[3],
-			"high":           fields[4],
-			"low":            fields[33],
-			"open":           fields[5],
-			"volume":         fields[6],
-			"buy_vol":        fields[7],
-			"sell_vol":       fields[8],
-			"bid_1":          fields[9],
-			"bid_1_vol":      fields[10],
-			"ask_1":          fields[11],
-			"ask_1_vol":      fields[12],
-			"bid_2":          fields[13],
-			"bid_2_vol":      fields[14],
-			"ask_2":          fields[15],
-			"ask_2_vol":      fields[16],
-			"bid_3":          fields[17],
-			"bid_3_vol":      fields[18],
-			"ask_3":          fields[19],
-			"ask_3_vol":      fields[20],
-			"bid_4":          fields[21],
-			"bid_4_vol":      fields[22],
-			"ask_4":          fields[23],
-			"ask_4_vol":      fields[24],
-			"bid_5":          fields[25],
-			"bid_5_vol":      fields[26],
-			"ask_5":          fields[27],
-			"ask_5_vol":      fields[28],
-			"trade_time":     fields[29],
-			"change":         fields[30],
-			"change_pct":     fields[31],
-			"pre_close":      fields[32],
+			"instrument_id": axCode,
+			"code":          code,
+			"name":          fields[1],
+			"close":         fields[3],
+			"high":          fields[4],
+			"low":           fields[33],
+			"open":          fields[5],
+			"volume":        fields[6],
+			"buy_vol":       fields[7],
+			"sell_vol":      fields[8],
+			"bid_1":         fields[9],
+			"bid_1_vol":     fields[10],
+			"ask_1":         fields[11],
+			"ask_1_vol":     fields[12],
+			"bid_2":         fields[13],
+			"bid_2_vol":     fields[14],
+			"ask_2":         fields[15],
+			"ask_2_vol":     fields[16],
+			"bid_3":         fields[17],
+			"bid_3_vol":     fields[18],
+			"ask_3":         fields[19],
+			"ask_3_vol":     fields[20],
+			"bid_4":         fields[21],
+			"bid_4_vol":     fields[22],
+			"ask_4":         fields[23],
+			"ask_4_vol":     fields[24],
+			"bid_5":         fields[25],
+			"bid_5_vol":     fields[26],
+			"ask_5":         fields[27],
+			"ask_5_vol":     fields[28],
+			"trade_time":    fields[29],
+			"change":        fields[30],
+			"change_pct":    fields[31],
+			"pre_close":     fields[32],
 		}
 		results = append(results, record)
 	}
@@ -288,7 +290,9 @@ func (a *TencentAdapter) parseKlineArray(arr []interface{}) []map[string]interfa
 	for _, item := range arr {
 		if s, ok := item.(string); ok {
 			fields := strings.Split(s, ",")
-			if len(fields) < 6 {
+			// The row below reads up to fields[6]; a guard of 6 let a 6-field
+			// row reach fields[6] and panic with index out of range.
+			if len(fields) < 7 {
 				continue
 			}
 			results = append(results, map[string]interface{}{

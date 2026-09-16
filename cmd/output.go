@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 
@@ -12,12 +13,42 @@ import (
 
 // printJSON writes v as indented JSON to out.
 func printJSON(out io.Writer, v interface{}) error {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := json.MarshalIndent(sanitizeJSON(v), "", "  ")
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(out, "%s\n", b)
 	return err
+}
+
+// sanitizeJSON replaces non-finite floats with null. json.Marshal refuses NaN
+// and ±Inf, so a single null cell from DuckDB would fail the whole encoding and
+// the command would report an error instead of returning its results.
+func sanitizeJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = sanitizeJSON(val)
+		}
+		return t
+	case []interface{}:
+		for i, val := range t {
+			t[i] = sanitizeJSON(val)
+		}
+		return t
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return nil
+		}
+		return t
+	case float32:
+		if math.IsNaN(float64(t)) || math.IsInf(float64(t), 0) {
+			return nil
+		}
+		return t
+	default:
+		return v
+	}
 }
 
 // newTable returns a writer with the analyst-suite defaults.

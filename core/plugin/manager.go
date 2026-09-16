@@ -10,39 +10,42 @@ import (
 
 // Plugin represents an installed plugin.
 type Plugin struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Version       string   `json:"version"`
-	Enabled       bool     `json:"enabled"`
-	Path          string   `json:"path"`
-	ProviderID    string   `json:"provider_id"`
-	SourceCode    string   `json:"source_code"`
-	SourceNameZh  string   `json:"source_name_zh"`
-	Interfaces    []string `json:"interfaces"`
-	Collectors    []string `json:"collectors"`
-	Dependencies  []string `json:"dependencies"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Enabled      bool     `json:"enabled"`
+	Path         string   `json:"path"`
+	ProviderID   string   `json:"provider_id"`
+	SourceCode   string   `json:"source_code"`
+	SourceNameZh string   `json:"source_name_zh"`
+	Interfaces   []string `json:"interfaces"`
+	Collectors   []string `json:"collectors"`
+	Dependencies []string `json:"dependencies"`
 }
 
 // PluginManager manages plugin lifecycle and provider discovery.
 type PluginManager struct {
-	mu         sync.RWMutex
-	plugins    map[string]*Plugin
-	installDir string
-	providers  map[string]SourceProvider // provider_id -> SourceProvider
+	mu           sync.RWMutex
+	plugins      map[string]*Plugin
+	metadataPath string
+	providers    map[string]SourceProvider // provider_id -> SourceProvider
 }
 
 // NewPluginManager creates a new plugin manager.
-func NewPluginManager(installDir string) *PluginManager {
+// metadataPath is the full path to the plugins.json file. It is resolved from
+// the data root, so callers that change the root after construction must call
+// Reload to pick up the new location.
+func NewPluginManager(metadataPath string) *PluginManager {
 	return &PluginManager{
-		plugins:   make(map[string]*Plugin),
-		installDir: installDir,
-		providers: make(map[string]SourceProvider),
+		plugins:      make(map[string]*Plugin),
+		metadataPath: metadataPath,
+		providers:    make(map[string]SourceProvider),
 	}
 }
 
 // Load reads plugin metadata from disk.
 func (pm *PluginManager) Load() error {
-	data, err := os.ReadFile(filepath.Join(pm.installDir, "plugins.json"))
+	data, err := os.ReadFile(pm.metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -61,8 +64,53 @@ func (pm *PluginManager) Load() error {
 	return nil
 }
 
+// Reload re-reads plugin metadata from the current metadata path. Called after
+// the data root changes so plugins registered from a stale location do not leak
+// into the correct one.
+func (pm *PluginManager) Reload() error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.loadLocked()
+}
+
+// loadLocked reads plugin metadata; callers must hold pm.mu.
+func (pm *PluginManager) loadLocked() error {
+	data, err := os.ReadFile(pm.metadataPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	var plugins []Plugin
+	if err := json.Unmarshal(data, &plugins); err != nil {
+		return err
+	}
+
+	for _, p := range plugins {
+		pm.plugins[p.ID] = &p
+	}
+	return nil
+}
+
+// SetMetadataPath repoints the manager at a different plugins.json file.
+func (pm *PluginManager) SetMetadataPath(path string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.metadataPath = path
+}
+
 // Save persists plugin metadata to disk.
 func (pm *PluginManager) Save() error {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	return pm.saveLocked()
+}
+
+// saveLocked persists plugin metadata; callers must hold pm.mu. Mutating methods
+// already hold the lock, so routing them through Save would deadlock.
+func (pm *PluginManager) saveLocked() error {
 	var plugins []Plugin
 	for _, p := range pm.plugins {
 		plugins = append(plugins, *p)
@@ -73,7 +121,12 @@ func (pm *PluginManager) Save() error {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(pm.installDir, "plugins.json"), data, 0644)
+	dir := filepath.Dir(pm.metadataPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("create metadata dir: %w", err)
+	}
+
+	return os.WriteFile(pm.metadataPath, data, 0644)
 }
 
 // RegisterProvider registers a SourceProvider with the manager.
@@ -249,7 +302,7 @@ func (pm *PluginManager) Install(path string) error {
 		Dependencies: manifest.Dependencies,
 	}
 
-	return pm.Save()
+	return pm.saveLocked()
 }
 
 // Uninstall removes a plugin.
@@ -262,7 +315,7 @@ func (pm *PluginManager) Uninstall(id string) error {
 	}
 
 	delete(pm.plugins, id)
-	return pm.Save()
+	return pm.saveLocked()
 }
 
 // Enable enables a plugin.
@@ -276,7 +329,7 @@ func (pm *PluginManager) Enable(id string) error {
 	}
 
 	p.Enabled = true
-	return pm.Save()
+	return pm.saveLocked()
 }
 
 // Disable disables a plugin.
@@ -290,6 +343,5 @@ func (pm *PluginManager) Disable(id string) error {
 	}
 
 	p.Enabled = false
-	return pm.Save()
+	return pm.saveLocked()
 }
-

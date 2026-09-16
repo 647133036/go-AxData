@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -22,13 +23,13 @@ import (
 
 // APIServer provides the HTTP API for AxData.
 type APIServer struct {
-	mu         sync.RWMutex
-	cfg        *config.Config
-	store      *storage.Store
-	querier    *query.Querier
-	collector  *collector.Collector
-	pluginMgr  *plugin.PluginManager
-	logger     *zap.Logger
+	mu        sync.RWMutex
+	cfg       *config.Config
+	store     *storage.Store
+	querier   *query.Querier
+	collector *collector.Collector
+	pluginMgr *plugin.PluginManager
+	logger    *zap.Logger
 }
 
 // NewAPIServer creates a new API server.
@@ -107,12 +108,12 @@ func (s *APIServer) schemaHandler(w http.ResponseWriter, r *http.Request) {
 	schemas := make(map[string]interface{})
 	for name, ts := range schema.TableRegistry {
 		schemas[name] = map[string]interface{}{
-			"name":        ts.Name,
-			"description": ts.Description,
-			"layer":       ts.Layer,
-			"write_mode":  ts.WriteMode,
+			"name":         ts.Name,
+			"description":  ts.Description,
+			"layer":        ts.Layer,
+			"write_mode":   ts.WriteMode,
 			"primary_keys": ts.PrimaryKeys,
-			"columns":     ts.Columns,
+			"columns":      ts.Columns,
 		}
 	}
 	json.NewEncoder(w).Encode(schemas)
@@ -198,11 +199,48 @@ func (s *APIServer) queryHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"results": results,
 		"count":   len(results),
 	})
+}
+
+// writeJSON encodes v as JSON with the given status code and reports an encoding
+// failure instead of swallowing it. Ignoring the encoder's error produced 200
+// responses with an empty body whenever a value could not be marshalled, such
+// as a NaN returned by DuckDB.
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(sanitizeJSON(v)); err != nil {
+		http.Error(w, "encode response: "+err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// sanitizeJSON replaces non-finite floats with null, since json.Marshal rejects
+// NaN and ±Inf.
+func sanitizeJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = sanitizeJSON(val)
+		}
+		return t
+	case []interface{}:
+		for i, val := range t {
+			t[i] = sanitizeJSON(val)
+		}
+		return t
+	case float64:
+		if math.IsNaN(t) || math.IsInf(t, 0) {
+			return nil
+		}
+	case float32:
+		if math.IsNaN(float64(t)) || math.IsInf(float64(t), 0) {
+			return nil
+		}
+	}
+	return v
 }
 
 // dataHandler returns data rows for a table.
@@ -221,11 +259,8 @@ func (s *APIServer) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 	parquetPath := s.cfg.CorePath(table)
 	if _, err := os.Stat(parquetPath); os.IsNotExist(err) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"table": table,
-			"rows":  []interface{}{},
-			"count": 0,
-		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"table": table, "rows": []interface{}{}, "count": 0})
 		return
 	}
 
@@ -244,11 +279,8 @@ func (s *APIServer) dataHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"table": table,
-		"rows":  results,
-		"count": len(results),
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"table": table, "rows": results, "count": len(results)})
 }
 
 // previewHandler returns preview rows from a table.
@@ -278,11 +310,8 @@ func (s *APIServer) previewHandler(w http.ResponseWriter, r *http.Request) {
 
 	parquetPath := s.cfg.CorePath(table)
 	if _, err := os.Stat(parquetPath); os.IsNotExist(err) {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"table": table,
-			"rows":  []interface{}{},
-			"count": 0,
-		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"table": table, "rows": []interface{}{}, "count": 0})
 		return
 	}
 
@@ -297,15 +326,19 @@ func (s *APIServer) previewHandler(w http.ResponseWriter, r *http.Request) {
 	whereParts := []string{}
 	params := []interface{}{}
 
-	if symbol != "" {
+	ts := schema.GetSchema(table)
+	// Filters and ordering are only appended when the table actually carries the
+	// column. Hardcoding ts_code/trade_date 500s on tables like
+	// stock_basic_exchange or fin_income that have neither.
+	if symbol != "" && hasColumn(ts, "ts_code") {
 		whereParts = append(whereParts, "ts_code = ?")
 		params = append(params, symbol)
 	}
-	if start != "" {
+	if start != "" && hasColumn(ts, "trade_date") {
 		whereParts = append(whereParts, "trade_date >= ?")
 		params = append(params, start)
 	}
-	if end != "" {
+	if end != "" && hasColumn(ts, "trade_date") {
 		whereParts = append(whereParts, "trade_date <= ?")
 		params = append(params, end)
 	}
@@ -313,7 +346,11 @@ func (s *APIServer) previewHandler(w http.ResponseWriter, r *http.Request) {
 	if len(whereParts) > 0 {
 		query += " WHERE " + strings.Join(whereParts, " AND ")
 	}
-	query += fmt.Sprintf(" ORDER BY trade_date DESC LIMIT %d", limit)
+	if hasColumn(ts, "trade_date") {
+		query += fmt.Sprintf(" ORDER BY trade_date DESC LIMIT %d", limit)
+	} else {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
 
 	results, err := s.querier.Execute(ctx, query, params...)
 	if err != nil {
@@ -322,14 +359,8 @@ func (s *APIServer) previewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"table":  table,
-		"rows":   results,
-		"count":  len(results),
-		"symbol": symbol,
-		"start":  start,
-		"end":    end,
-	})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"table": table, "rows": results, "count": len(results), "symbol": symbol, "start": start, "end": end})
 }
 
 // collectorTasksHandler lists all tasks.
@@ -342,12 +373,12 @@ func (s *APIServer) collectorTasksHandler(w http.ResponseWriter, r *http.Request
 // collectorAddTaskHandler creates a new task.
 func (s *APIServer) collectorAddTaskHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string                 `json:"name"`
-		Source      string                 `json:"source"`
-		Interface   string                 `json:"interface"`
-		Table       string                 `json:"table"`
-		Layer       string                 `json:"layer"`
-		Params      map[string]interface{} `json:"params"`
+		Name      string                 `json:"name"`
+		Source    string                 `json:"source"`
+		Interface string                 `json:"interface"`
+		Table     string                 `json:"table"`
+		Layer     string                 `json:"layer"`
+		Params    map[string]interface{} `json:"params"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -518,9 +549,9 @@ func (s *APIServer) sourceRequestHandler(w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"source":  sourceName,
-		"rows":    data,
-		"count":   len(data),
+		"source": sourceName,
+		"rows":   data,
+		"count":  len(data),
 	})
 }
 
@@ -606,7 +637,25 @@ func (s *APIServer) sourceInterfacesHandler(w http.ResponseWriter, r *http.Reque
 	json.NewEncoder(w).Encode(interfaces)
 }
 
+// hasColumn reports whether a table's schema declares the given column.
+func hasColumn(ts *schema.TableSchema, name string) bool {
+	if ts == nil {
+		return false
+	}
+	for _, c := range ts.Columns {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Shutdown gracefully shuts down the API server.
 func (s *APIServer) Shutdown(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.logger.Info("shutting down API server")
+	if err := s.logger.Sync(); err != nil {
+		s.logger.Warn("logger sync failed", zap.Error(err))
+	}
 }

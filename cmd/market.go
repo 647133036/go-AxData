@@ -114,6 +114,16 @@ func (r *RootCmd) runChart(ctx context.Context, code string, limit, rows, cols i
 		return err
 	}
 
+	// The SVG is written to a file and is independent of how stdout is
+	// formatted, so it runs before the JSON branch. Returning early here made
+	// `--format-json --svg out.svg` silently skip the export.
+	if svgPath != "" {
+		if err := writeSVG(svgPath, chart.RenderSVG(chartData, 1200, 640)); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "SVG written to %s\n", svgPath)
+	}
+
 	if isJSON {
 		out := map[string]interface{}{
 			"code":   code,
@@ -121,16 +131,11 @@ func (r *RootCmd) runChart(ctx context.Context, code string, limit, rows, cols i
 			"first":  chartData.Dates[0],
 			"last":   market.LastBarDate(bars),
 			"detail": chartData.DetailTable(10),
+			"svg":    svgPath,
 		}
 		return printJSON(os.Stdout, out)
 	}
 
-	if svgPath != "" {
-		if err := writeSVG(svgPath, chart.RenderSVG(chartData, 1200, 640)); err != nil {
-			return err
-		}
-		fmt.Printf("SVG written to %s\n\n", svgPath)
-	}
 	fmt.Print(chart.RenderASCII(chartData, rows, cols))
 	fmt.Println()
 	fmt.Printf("最新交易日 %s  收盘 %.2f  MA5 %.2f  MA20 %.2f  RSI %.1f\n",

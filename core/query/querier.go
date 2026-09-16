@@ -91,24 +91,48 @@ func (q *Querier) ExecuteWithColumns(ctx context.Context, sql string, params ...
 }
 
 // AttachParquet attaches a Parquet file as a DuckDB table.
+//
+// CREATE OR REPLACE is required: handlers reuse a fixed staging table name, so
+// a second request against the same name would otherwise fail with "relation
+// already exists" and surface as a 500.
 func (q *Querier) AttachParquet(ctx context.Context, table string, path string) error {
-	_, err := q.conn.ExecContext(ctx, fmt.Sprintf("CREATE TABLE %s AS SELECT * FROM read_parquet('%s')", table, path))
+	_, err := q.conn.ExecContext(ctx, fmt.Sprintf("CREATE OR REPLACE TABLE %s AS SELECT * FROM read_parquet(%s)", table, quoteSQL(path)))
 	if err != nil {
 		return fmt.Errorf("attach parquet: %w", err)
 	}
 	return nil
 }
 
+// quoteSQL renders a string as a single-quoted SQL literal, escaping embedded
+// quotes so a path can never break out of the string and change the statement.
+func quoteSQL(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// ValidateSQL rejects SQL that can write, modify the catalog, load external
+// code, or reach the network.
+//
+// The blocked-word list matters more than it looks: DuckDB permits
+// CREATE/DROP/ALTER/COPY, which mutate the database, and INSTALL/LOAD plus
+// read_csv/read_parquet/http_get, which read arbitrary files and fetch remote
+// URLs. A query API reachable without authentication needs all of these shut
+// off, since the statement is fully client-supplied.
+var blockedSQL = []string{
+	"DROP ", "DROP(", "DELETE ", "ALTER ", "CREATE ", "INSERT ", "UPDATE ",
+	"MERGE ", "COPY ", "VACUUM ", "ATTACH ", "DETACH ",
+	"INSTALL ", "LOAD ",
+	"read_csv", "read_parquet", "read_json", "read_text", "read_blob",
+	"read_xml", "read_xlsx", "http_get", "http_post", "http_headers",
+	"curl", "system", "shell",
+	"--", ";",
+}
+
 // ValidateSQL validates a SQL query for basic safety.
-// Blocks DROP, DELETE, ALTER, CREATE, INSERT, UPDATE, and system tables.
 // Note: This is a basic guard; for full safety use parameterized queries.
 func ValidateSQL(sql string) error {
 	upper := strings.ToUpper(strings.TrimSpace(sql))
-	for _, keyword := range []string{
-		"DROP ", "DROP(", "DELETE ", "ALTER ", "CREATE ", "INSERT ", "UPDATE ",
-		"--", ";",
-	} {
-		if strings.Contains(upper, keyword) {
+	for _, keyword := range blockedSQL {
+		if strings.Contains(upper, strings.ToUpper(keyword)) {
 			return fmt.Errorf("sql contains blocked keyword: %s", keyword)
 		}
 	}

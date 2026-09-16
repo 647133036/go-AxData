@@ -2,9 +2,52 @@ package tdx
 
 import (
 	"context"
+	"errors"
+	"net"
+	"strings"
 	"testing"
 	"time"
 )
+
+// TestTDXRequestReportsUnimplemented pins the adapter's failure mode: because
+// the 7709 response decoder is missing, every request must fail fast with a
+// message that names the adapter, rather than hanging until the network timeout.
+// A real local listener is used so connect() succeeds and the failure reaches
+// readRawResponse instead of being masked by a dial error.
+func TestTDXRequestReportsUnimplemented(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+
+	a := NewTDXAdapter([]string{ln.Addr().String()})
+	start := time.Now()
+	_, err = a.Request(context.Background(), map[string]interface{}{"interface": "handshake"})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from the unimplemented adapter")
+	}
+	if !errors.Is(err, errUnimplemented) {
+		t.Errorf("error %v, want errUnimplemented", err)
+	}
+	if !strings.Contains(err.Error(), "tdx adapter is not implemented") {
+		t.Errorf("error %q does not name the adapter", err.Error())
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("failed after %v; expected a fast failure", elapsed)
+	}
+}
 
 func TestNewTDXAdapter(t *testing.T) {
 	a := NewDefaultTDXAdapter()

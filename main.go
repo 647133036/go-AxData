@@ -29,7 +29,16 @@ import (
 )
 
 func main() {
-	logger, _ := zap.NewProduction()
+	// This is a CLI: the fatal message is the whole user-facing output, so
+	// caller annotations and stacktraces only add noise and leak the local
+	// build path. zap recommends both be disabled for production binaries.
+	zapCfg := zap.NewProductionConfig()
+	zapCfg.DisableCaller = true
+	zapCfg.DisableStacktrace = true
+	logger, err := zapCfg.Build()
+	if err != nil {
+		logger, _ = zap.NewProduction()
+	}
 	defer logger.Sync()
 
 	dataRoot := os.Getenv("AXDATA_ROOT")

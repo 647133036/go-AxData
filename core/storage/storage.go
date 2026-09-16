@@ -1,12 +1,16 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/electkismet/axdata-go/core/config"
 	"github.com/electkismet/axdata-go/core/schema"
@@ -59,38 +63,11 @@ func (s *Store) Write(layer, table string, records []interface{}) error {
 
 	// Overwrite mode: write as new file
 	path := filepath.Join(dir, table+".parquet")
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("create parquet file: %w", err)
+	if err := writeParquetAtomic(dir, path, table, typedRecords); err != nil {
+		return err
 	}
 
-	// Use parquet-go with typed struct
-	if isTyped(typedRecords) {
-		ps := parquet.SchemaOf(typedRecords[0])
-		pw := parquet.NewWriter(f, ps)
-		for _, rec := range typedRecords {
-			if err := pw.Write(rec); err != nil {
-				pw.Close()
-				f.Close()
-				return fmt.Errorf("write record: %w", err)
-			}
-		}
-		if err := pw.Close(); err != nil {
-			f.Close()
-			return fmt.Errorf("close parquet writer: %w", err)
-		}
-	} else {
-		if err := s.writeFileGeneric(f, table, records); err != nil {
-			f.Close()
-			return err
-		}
-	}
-	f.Close()
-
-	// Store row count metadata
-	os.WriteFile(path+".count", []byte(strconv.Itoa(len(records))), 0644)
-
-	return nil
+	return writeCount(path, len(typedRecords))
 }
 
 // isTyped reports whether the converted records are typed structs rather than
@@ -106,7 +83,7 @@ func isTyped(records []interface{}) bool {
 // writeFileGeneric writes records whose table has no typed struct. It builds a
 // schema from the union of observed column names so that columns survive a
 // round-trip instead of collapsing into a single map blob.
-func (s *Store) writeFileGeneric(f *os.File, table string, records []interface{}) error {
+func writeGeneric(f *os.File, table string, records []interface{}) error {
 	if len(records) == 0 {
 		return nil
 	}
@@ -345,18 +322,110 @@ func convertRecords(records []interface{}, table string) []interface{} {
 // toMap converts a record to a map of column names to string values.
 // Handles nil values by returning empty strings.
 func toMap(rec interface{}) map[string]string {
-	if m, ok := rec.(map[string]interface{}); ok {
-		result := make(map[string]string)
-		for k, v := range m {
-			if v == nil {
-				result[k] = ""
-				continue
-			}
-			result[k] = fmt.Sprintf("%v", v)
+	switch v := rec.(type) {
+	case map[string]interface{}:
+		return mapInterfaceToString(v)
+	case map[string]string:
+		result := make(map[string]string, len(v))
+		for k, val := range v {
+			result[k] = val
+		}
+		return result
+	case *Record:
+		if v.Columns == nil {
+			return nil
+		}
+		result := make(map[string]string, len(v.Columns))
+		for k, val := range v.Columns {
+			result[k] = val
 		}
 		return result
 	}
+	if m, ok := toMapOfStruct(rec); ok {
+		return m
+	}
 	return nil
+}
+
+// mapInterfaceToString renders interface values as strings, mapping nil to "".
+func mapInterfaceToString(m map[string]interface{}) map[string]string {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		if v == nil {
+			result[k] = ""
+			continue
+		}
+		result[k] = scalarString(reflect.ValueOf(v))
+	}
+	return result
+}
+
+// toMapOfStruct flattens a struct into a column map using its parquet tags.
+// Storage callers pass typed schema records rather than maps, so without this
+// path every field would read back as zero.
+func toMapOfStruct(rec interface{}) (map[string]string, bool) {
+	v := reflect.ValueOf(rec)
+	for v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return nil, false
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil, false
+	}
+
+	t := v.Type()
+	result := make(map[string]string, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		name := field.Tag.Get("parquet")
+		if name == "-" {
+			continue
+		}
+		if name == "" {
+			name = field.Name
+		}
+		result[name] = scalarString(v.Field(i))
+	}
+	return result, true
+}
+
+// scalarString renders a scalar field value without losing float precision.
+func scalarString(v reflect.Value) string {
+	if !v.IsValid() {
+		return ""
+	}
+	if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return ""
+		}
+		return scalarString(v.Elem())
+	}
+	switch v.Kind() {
+	case reflect.String:
+		return v.String()
+	case reflect.Bool:
+		return strconv.FormatBool(v.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(v.Int(), 10)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(v.Uint(), 10)
+	case reflect.Float32, reflect.Float64:
+		return strconv.FormatFloat(v.Float(), 'g', -1, 64)
+	case reflect.Map, reflect.Slice, reflect.Array:
+		if v.IsNil() || v.Len() == 0 {
+			return ""
+		}
+		return fmt.Sprintf("%v", v.Interface())
+	case reflect.Struct:
+		if tm, ok := v.Interface().(time.Time); ok {
+			return tm.UTC().Format("2006-01-02 15:04:05")
+		}
+		return fmt.Sprintf("%v", v.Interface())
+	default:
+		return fmt.Sprintf("%v", v.Interface())
+	}
 }
 
 func parseFloat(s string) float64 {
@@ -414,7 +483,13 @@ func (s *Store) ListTables(layer string) []string {
 	return tables
 }
 
-// Append writes records to an existing Parquet file.
+// Append merges records into an existing Parquet file.
+//
+// Parquet has a footer at the end of the file, so bytes cannot be appended in
+// place. Merging means reading the current rows, combining them with the new
+// ones, and replacing the file atomically. Writing over an existing file
+// without truncating it leaves overlapping footers and produces a file that
+// neither parquet-go nor DuckDB can open.
 func (s *Store) Append(layer string, table string, records []interface{}) error {
 	dir := s.config.DataDir(layer)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -431,40 +506,205 @@ func (s *Store) Append(layer string, table string, records []interface{}) error 
 	}
 
 	path := filepath.Join(dir, table+".parquet")
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0644)
+
+	existing, err := readParquet(path, table)
 	if err != nil {
-		return fmt.Errorf("open file: %w", err)
+		return fmt.Errorf("read existing rows: %w", err)
 	}
 
+	merged := make([]interface{}, 0, len(existing)+len(records))
+	merged = append(merged, existing...)
+	merged = append(merged, records...)
+
+	if schemaDef.WriteMode == "upsert_by_key" && len(schemaDef.PrimaryKeys) > 0 {
+		merged = dedupeByKeys(merged, schemaDef.PrimaryKeys)
+	}
+
+	if err := writeParquetAtomic(dir, path, table, merged); err != nil {
+		return err
+	}
+
+	return writeCount(path, len(merged))
+}
+
+// readParquet reads every row of an existing file back into records of the same
+// representation that convertRecords produces. A missing file yields no rows.
+func readParquet(path, table string) ([]interface{}, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer f.Close()
+
+	r := parquet.NewReader(f)
+	defer r.Close()
+
+	if r.NumRows() == 0 {
+		return nil, nil
+	}
+
+	out := make([]interface{}, 0, r.NumRows())
+	for {
+		var rec interface{}
+		if typed := newTypedRecord(table); typed != nil {
+			if err := r.Read(typed); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, err
+			}
+			rec = typed
+		} else {
+			// Generic tables are stored as a string column group. Reconstructing
+			// into map[string]string fails on numeric columns, so read into a
+			// pre-initialised map and normalise to strings. A nil map panics
+			// inside parquet-go's reflection path.
+			m := map[string]interface{}{}
+			if err := r.Read(&m); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				return nil, err
+			}
+			rec = &Record{Columns: stringMap(m)}
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// newTypedRecord returns a fresh pointer of the record type used for a table,
+// or nil when the table is stored generically.
+func newTypedRecord(table string) interface{} {
+	switch table {
+	case "daily":
+		return &schema.DailyRecord{}
+	case "adj_factor":
+		return &schema.AdjFactorRecord{}
+	case "trade_cal":
+		return &schema.TradeCalRecord{}
+	case "stock_basic_exchange":
+		return &schema.StockBasicRecord{}
+	case "fin_income":
+		return &schema.IncomeRecord{}
+	case "fin_balance":
+		return &schema.BalanceRecord{}
+	case "fin_cashflow":
+		return &schema.CashflowRecord{}
+	case "business_scope":
+		return &schema.BusinessScopeRecord{}
+	case "earnings_forecast":
+		return &schema.EarningsForecastRecord{}
+	case "valuation_snapshot":
+		return &schema.ValuationSnapshotRecord{}
+	default:
+		return nil
+	}
+}
+
+// dedupeByKeys keeps the last record seen for each primary key combination,
+// which is the upsert semantics recorded in the table registry.
+func dedupeByKeys(records []interface{}, keys []string) []interface{} {
+	index := make(map[string]int, len(records))
+	out := make([]interface{}, 0, len(records))
+	for _, rec := range records {
+		m := toMap(rec)
+		if m == nil {
+			out = append(out, rec)
+			continue
+		}
+		parts := make([]string, 0, len(keys))
+		for _, col := range keys {
+			parts = append(parts, m[col])
+		}
+		k := strings.Join(parts, "\x00")
+		if i, ok := index[k]; ok {
+			out[i] = rec
+			continue
+		}
+		index[k] = len(out)
+		out = append(out, rec)
+	}
+	return out
+}
+
+// writeParquetAtomic writes records to a temporary file in the destination
+// directory, then renames it over the target. Renaming is atomic on the same
+// filesystem, so a reader never observes a partially written table.
+func writeParquetAtomic(dir, path, table string, records []interface{}) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tmp, err := os.CreateTemp(dir, table+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		tmp.Close()
+		os.Remove(tmpName)
+	}
+
+	var writeErr error
+	if isTyped(records) {
+		writeErr = writeTyped(tmp, records)
+	} else {
+		writeErr = writeGeneric(tmp, table, records)
+	}
+	if writeErr != nil {
+		cleanup()
+		return writeErr
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("replace parquet file: %w", err)
+	}
+	return nil
+}
+
+// writeTyped writes struct records using a schema derived from the struct tags.
+func writeTyped(f *os.File, records []interface{}) error {
 	ps := parquet.SchemaOf(records[0])
 	pw := parquet.NewWriter(f, ps)
 
 	for _, rec := range records {
 		if err := pw.Write(rec); err != nil {
 			pw.Close()
-			f.Close()
 			return fmt.Errorf("write record: %w", err)
 		}
 	}
 
 	if err := pw.Close(); err != nil {
-		f.Close()
 		return fmt.Errorf("close parquet writer: %w", err)
 	}
-	f.Close()
-
-	// Update row count metadata
-	countPath := path + ".count"
-	countData, err := os.ReadFile(countPath)
-	if err == nil {
-		count, parseErr := strconv.Atoi(string(countData))
-		if parseErr == nil {
-			count += len(records)
-			os.WriteFile(countPath, []byte(strconv.Itoa(count)), 0644)
-		}
-	} else {
-		os.WriteFile(countPath, []byte(strconv.Itoa(len(records))), 0644)
-	}
-
 	return nil
+}
+
+// writeCount persists the row count metadata that Count reads back.
+func writeCount(path string, n int) error {
+	if err := os.WriteFile(path+".count", []byte(strconv.Itoa(n)), 0644); err != nil {
+		return fmt.Errorf("write count metadata: %w", err)
+	}
+	return nil
+}
+
+// stringMap converts parsed values to strings for the generic record shape.
+func stringMap(m map[string]interface{}) map[string]string {
+	result := make(map[string]string, len(m))
+	for k, v := range m {
+		if v == nil {
+			result[k] = ""
+			continue
+		}
+		result[k] = scalarString(reflect.ValueOf(v))
+	}
+	return result
 }

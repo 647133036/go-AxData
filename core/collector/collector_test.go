@@ -69,10 +69,10 @@ func TestBuildDailyRecord(t *testing.T) {
 	// exists but none of its keys match the input data, the data won't be mapped.
 	// Pass ts_code/pct_chg/vol directly so they pass through as schema columns.
 	data := map[string]interface{}{
-		"ts_code":  "000001.SZ",
-		"vol":      float64(1000.0),
-		"pct_chg":  float64(2.5),
-		"open":     float64(10.0),
+		"ts_code": "000001.SZ",
+		"vol":     float64(1000.0),
+		"pct_chg": float64(2.5),
+		"open":    float64(10.0),
 	}
 	result := buildDailyRecord(data)
 	dr, ok := result.(schema.DailyRecord)
@@ -129,8 +129,8 @@ func TestBuildRecord(t *testing.T) {
 
 func TestGetString(t *testing.T) {
 	data := map[string]interface{}{
-		"str":  "hello",
-		"num":  int64(42),
+		"str": "hello",
+		"num": int64(42),
 	}
 	if getString(data, "str") != "hello" {
 		t.Errorf("getString(str): got %s, want hello", getString(data, "str"))
@@ -386,11 +386,11 @@ func TestExecuteTask_TaskParamOverrides(t *testing.T) {
 	// Add a fake interface for this test
 	customIface := "custom_mock_daily"
 	source.ProviderRegistry[customIface] = &source.ProviderInterface{
-		Name:        customIface,
-		SourceCode:  "mock-data",
-		Table:       "daily",
-		Layer:       "core",
-		WriteMode:   "append",
+		Name:       customIface,
+		SourceCode: "mock-data",
+		Table:      "daily",
+		Layer:      "core",
+		WriteMode:  "append",
 	}
 	defer func() {
 		delete(source.ProviderRegistry, customIface)
@@ -419,8 +419,8 @@ type errorAdapter struct {
 	err  error
 }
 
-func (a *errorAdapter) Name() string           { return a.name }
-func (a *errorAdapter) Description() string    { return "error adapter" }
+func (a *errorAdapter) Name() string        { return a.name }
+func (a *errorAdapter) Description() string { return "error adapter" }
 func (a *errorAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	return nil, a.err
 }
@@ -430,8 +430,8 @@ type emptyAdapter struct {
 	name string
 }
 
-func (a *emptyAdapter) Name() string            { return a.name }
-func (a *emptyAdapter) Description() string     { return "empty adapter" }
+func (a *emptyAdapter) Name() string        { return a.name }
+func (a *emptyAdapter) Description() string { return "empty adapter" }
 func (a *emptyAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	return nil, nil
 }
@@ -441,27 +441,27 @@ type mockDataAdapter struct {
 	name string
 }
 
-func (a *mockDataAdapter) Name() string             { return a.name }
-func (a *mockDataAdapter) Description() string      { return "mock data adapter" }
+func (a *mockDataAdapter) Name() string        { return a.name }
+func (a *mockDataAdapter) Description() string { return "mock data adapter" }
 func (a *mockDataAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	return []map[string]interface{}{
 		{
-			"ts_code":  "000001.SZ",
-			"vol":      float64(1000),
-			"pct_chg":  float64(2.5),
-			"open":     float64(10.0),
-			"high":     float64(11.0),
-			"low":      float64(9.5),
-			"close":    float64(10.8),
+			"ts_code": "000001.SZ",
+			"vol":     float64(1000),
+			"pct_chg": float64(2.5),
+			"open":    float64(10.0),
+			"high":    float64(11.0),
+			"low":     float64(9.5),
+			"close":   float64(10.8),
 		},
 		{
-			"ts_code":  "000002.SZ",
-			"vol":      float64(2000),
-			"pct_chg":  float64(-1.2),
-			"open":     float64(30.0),
-			"high":     float64(31.0),
-			"low":      float64(29.5),
-			"close":    float64(29.8),
+			"ts_code": "000002.SZ",
+			"vol":     float64(2000),
+			"pct_chg": float64(-1.2),
+			"open":    float64(30.0),
+			"high":    float64(31.0),
+			"low":     float64(29.5),
+			"close":   float64(29.8),
 		},
 	}, nil
 }

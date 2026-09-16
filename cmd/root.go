@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,17 @@ func NewRootCommand(cfg *config.Config, store *storage.Store, querier *query.Que
 	// once the flag has been parsed or they keep pointing at the default root.
 	cmd.PersistentPreRun = func(c *cobra.Command, args []string) {
 		cfg.SetDataRoot(cfg.DataRoot)
+
+		// The collector and plugin manager were built before this flag existed
+		// and already loaded metadata from the default root. Repoint and reload
+		// so `task add` written under a custom root is visible to `task list`.
+		pluginMgr.SetMetadataPath(cfg.Metadata.PluginsPath)
+		if err := pluginMgr.Reload(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reload plugin metadata: %v\n", err)
+		}
+		if err := collector.ReloadMetadata(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: reload collector metadata: %v\n", err)
+		}
 
 		// Written to stderr so that commands emitting JSON on stdout stay
 		// machine-parseable when piped.
@@ -167,14 +179,14 @@ func newDoctorCmd(r *RootCmd) *cobra.Command {
 		Use:   "doctor",
 		Short: "Check AxData environment",
 		Long:  "Verify the AxData installation and environment.",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			r.runDoctor(ctx)
+			return r.runDoctor(ctx)
 		},
 	}
 }
 
-func (r *RootCmd) runDoctor(ctx context.Context) {
+func (r *RootCmd) runDoctor(ctx context.Context) error {
 	checks := []struct {
 		name string
 		fn   func() error
@@ -213,7 +225,8 @@ func (r *RootCmd) runDoctor(ctx context.Context) {
 
 	if allPassed {
 		fmt.Printf("\nAll checks passed!\n")
-	} else {
-		fmt.Printf("\nSome checks failed. Please fix the issues above.\n")
+		return nil
 	}
+	fmt.Printf("\nSome checks failed. Please fix the issues above.\n")
+	return errors.New("environment checks failed")
 }
