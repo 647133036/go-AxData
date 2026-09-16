@@ -304,6 +304,35 @@ func TestCorrelationInvariance(t *testing.T) {
 	}
 }
 
+func TestCorrelationMonotonicDegradation(t *testing.T) {
+	// Correlation must fall monotonically as independent noise is mixed into
+	// one series: at zero noise the series correlate perfectly, and each added
+	// increment of noise pushes the relationship toward zero. The signal must
+	// carry more variance than the noise, otherwise the degradation bound is
+	// not near zero and the ordering is not meaningful.
+	signal := rng(1, 200, 0.001, 0.02)
+	noise := rng(999, 200, 0, 0.005)
+	if r := pearson(signal, noise); math.Abs(r) > 0.2 {
+		t.Fatalf("noise seed correlated with signal: %f", r)
+	}
+
+	prev := math.Inf(1)
+	for _, w := range []float64{0, 0.25, 0.5, 1, 2, 4, 8} {
+		mixed := make([]float64, len(signal))
+		for i := range signal {
+			mixed[i] = signal[i] + w*noise[i]
+		}
+		r := pearson(signal, mixed)
+		if math.Abs(r) > 1+1e-9 {
+			t.Fatalf("correlation out of range at weight %v: %f", w, r)
+		}
+		if r >= prev {
+			t.Fatalf("correlation must strictly decrease as noise weight rises: %f at weight %v follows %f", r, w, prev)
+		}
+		prev = r
+	}
+}
+
 func TestVolatilityPositive(t *testing.T) {
 	if volatility([]float64{1, 1, 1, 1}) != 0 {
 		t.Fatal("constant series must have zero volatility")
