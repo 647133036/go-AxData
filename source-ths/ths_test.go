@@ -60,8 +60,8 @@ func TestCleanCode(t *testing.T) {
 		{nil, ""},
 		{"undefined", ""},
 		{"null", ""},
-		{"6.00.00", ""},     // strips dots, leaves "60000" (5 digits), not 6-digit
-		{"12345", ""},        // only 5 digits
+		{"6.00.00", ""}, // strips dots, leaves "60000" (5 digits), not 6-digit
+		{"12345", ""},   // only 5 digits
 	}
 	for _, tc := range tests {
 		result := cleanCode(tc.input)

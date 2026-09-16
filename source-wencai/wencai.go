@@ -148,12 +148,12 @@ func (a *WencaiAdapter) queryWencai(ctx context.Context, query string, page, lim
 	}
 
 	var wencaiResp struct {
-		Success bool `json:"success"`
+		Success bool   `json:"success"`
 		Message string `json:"message"`
 		Data    struct {
 			Result struct {
-				Title  []interface{}      `json:"title"`
-				Result [][]interface{}    `json:"result"`
+				Title  []interface{}   `json:"title"`
+				Result [][]interface{} `json:"result"`
 			} `json:"result"`
 		} `json:"data"`
 	}

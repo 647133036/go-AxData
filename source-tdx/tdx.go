@@ -1,10 +1,13 @@
 package tdx
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -19,8 +22,20 @@ const (
 	REQ_PREFIX      byte   = 0x0C
 	REQ_HEADER_SIZE uint32 = 13
 
-	// Response frame
-	RES_HEADER_SIZE uint32 = 16 // 4 (prefix) + 12
+	// Response frame. Requests and replies share one 13-byte header layout:
+	//
+	//	0x00  1    reserved          (0x0C on request, 0x00 on reply)
+	//	0x01  4    msg_id            uint32 LE
+	//	0x05  2    control           0x0001 plain, 0x0002 zlib payload
+	//	0x07  2    data_len          payload byte count
+	//	0x09  2    data_len + 2      payload plus the command field
+	//	0x0B  2    command           uint16 LE, echoed back
+	//	0x0D  n    payload
+	RES_HEADER_SIZE uint32 = 13
+
+	// Response control field values.
+	RESP_CONTROL_PLAIN      uint16 = 0x0001
+	RESP_CONTROL_COMPRESSED uint16 = 0x0002
 
 	// Environment variable for custom hosts (comma-separated "host:port").
 	ENV_TDX_HOSTS = "AXDATA_TDX_HOSTS"
@@ -393,7 +408,7 @@ func (a *TDXAdapter) exchange(conn net.Conn, req *WireRequest) (*WireResponse, e
 	if _, err := conn.Write(data); err != nil {
 		return nil, err
 	}
-	return readRawResponse(conn)
+	return readRawResponse(conn, req.Command)
 }
 
 // ─── Request builder ────────────────────────────────────────────────────
@@ -478,33 +493,90 @@ func parseRows(cmdName interface{}, resp *WireResponse) ([]map[string]interface{
 	}
 }
 
-// encodeRequest encodes a WireRequest into bytes for transmission.
+// encodeRequest encodes a WireRequest into a 7709 request frame. The two
+// length fields are payload_len and payload_len+2 (payload plus the command
+// field); they must match the number of bytes actually sent, otherwise a
+// conforming server reads past the end of the frame.
 func encodeRequest(req *WireRequest) ([]byte, error) {
 	msgID := generateMsgID()
-	length := uint16(len(req.Payload) + 2) // +2 for control + command
-	buf := make([]byte, 13+len(req.Payload))
+	payloadLen := uint16(len(req.Payload))
+	buf := make([]byte, int(REQ_HEADER_SIZE)+len(req.Payload))
 	buf[0] = REQ_PREFIX
 	binary.LittleEndian.PutUint32(buf[1:], msgID)
 	binary.LittleEndian.PutUint16(buf[5:], 1) // control = 1
-	binary.LittleEndian.PutUint16(buf[7:], uint16(length))
-	binary.LittleEndian.PutUint16(buf[9:], uint16(length))
+	binary.LittleEndian.PutUint16(buf[7:], payloadLen)
+	binary.LittleEndian.PutUint16(buf[9:], payloadLen+2)
 	binary.LittleEndian.PutUint16(buf[11:], req.Command)
-	copy(buf[13:], req.Payload)
+	copy(buf[REQ_HEADER_SIZE:], req.Payload)
 	return buf, nil
 }
 
-// errUnimplemented is returned by every TDX request. The adapter's wire
-// encoding, session handshake and zlib decompression are only partially
-// written: buildRequest can emit a frame, but nothing can decode the reply, so
-// no request can ever succeed. The error names the adapter rather than failing
-// silently or hanging until the connection timeout.
-var errUnimplemented = errors.New(
-	"tdx adapter is not implemented: the wire response decoder is missing, " +
-		"so requests cannot be completed; use a different source adapter")
+// Errors returned by the wire decoder. All of them name the failing field so a
+// reply that fails validation can be diagnosed without a packet capture.
+var (
+	errTDXHeaderTooShort = errors.New("tdx: response header shorter than 13 bytes")
+	errTDXPayloadShort   = errors.New("tdx: response payload shorter than declared length")
+	errTDXLengthMismatch = errors.New("tdx: response length fields disagree")
+	errTDXCommandEcho    = errors.New("tdx: response command does not match the request")
+)
 
-// readRawResponse reads one TDX response frame from a connection.
-func readRawResponse(conn net.Conn) (*WireResponse, error) {
-	return nil, errUnimplemented
+// readRawResponse reads one TDX response frame from a connection and returns
+// it with the payload already decompressed, so parsers can read fixed-size
+// records straight out of Data.
+//
+// wantCommand is the command the request used; a mismatched echo means the
+// reply belongs to a different request and parsing it would silently produce
+// garbage rows.
+func readRawResponse(r io.Reader, wantCommand uint16) (*WireResponse, error) {
+	head := make([]byte, RES_HEADER_SIZE)
+	if _, err := io.ReadFull(r, head); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("%w: declared %d bytes", errTDXHeaderTooShort, RES_HEADER_SIZE)
+		}
+		return nil, fmt.Errorf("tdx: reading response header: %w", err)
+	}
+
+	dataLen := int(binary.LittleEndian.Uint16(head[7:9]))
+	dataLenPlus := int(binary.LittleEndian.Uint16(head[9:11]))
+	if dataLenPlus > dataLen && dataLenPlus != dataLen+2 {
+		return nil, fmt.Errorf("%w: len1=%d len2=%d", errTDXLengthMismatch, dataLen, dataLenPlus)
+	}
+
+	payload := make([]byte, dataLen)
+	if _, err := io.ReadFull(r, payload); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("%w: declared %d bytes", errTDXPayloadShort, dataLen)
+		}
+		return nil, fmt.Errorf("tdx: reading %d payload bytes: %w", dataLen, err)
+	}
+
+	// RawData is the frame as it appeared on the wire, so it keeps the
+	// compressed bytes. Data is the decompressed payload.
+	wire := append(append(make([]byte, 0, int(RES_HEADER_SIZE)+dataLen), head...), payload...)
+
+	control := binary.LittleEndian.Uint16(head[5:7])
+	if control != RESP_CONTROL_PLAIN && control != RESP_CONTROL_COMPRESSED {
+		return nil, fmt.Errorf("tdx: unknown control field 0x%04X", control)
+	}
+	if control == RESP_CONTROL_COMPRESSED {
+		out, err := zlibDecompress(payload)
+		if err != nil {
+			return nil, fmt.Errorf("tdx: decompressing %d-byte payload: %w", dataLen, err)
+		}
+		payload = out
+	}
+
+	got := binary.LittleEndian.Uint16(head[11:13])
+	if got != wantCommand {
+		return nil, fmt.Errorf("%w: sent 0x%04X, got 0x%04X", errTDXCommandEcho, wantCommand, got)
+	}
+
+	return &WireResponse{
+		Command: got,
+		MsgID:   binary.LittleEndian.Uint32(head[1:5]),
+		Data:    payload,
+		RawData: wire,
+	}, nil
 }
 
 // buildQuotesRequest builds a quote fetch request.
@@ -1415,8 +1487,16 @@ func deadlineFromContext(ctx context.Context, seconds int) time.Time {
 	return time.Now().Add(time.Duration(seconds) * time.Second)
 }
 
+// zlibDecompress inflates a payload carrying a zlib header (control field
+// 0x0002). TDX replies are zlib, not raw deflate, so flate.NewReader would
+// fail on the two-byte header.
 func zlibDecompress(data []byte) ([]byte, error) {
-	return nil, errors.New("zlib not implemented; use compress/zlib")
+	zr, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+	return io.ReadAll(zr)
 }
 
 // utf8Safe ensures the string is valid UTF-8

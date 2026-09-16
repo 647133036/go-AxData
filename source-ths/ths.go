@@ -68,9 +68,9 @@ func (a *THSAdapter) Request(ctx context.Context, params map[string]interface{})
 
 func (a *THSAdapter) getHotRank(ctx context.Context, limit int) ([]map[string]interface{}, error) {
 	params := url.Values{
-		"stock_type":  {"a"},
-		"type":        {"hour"},
-		"list_type":   {"normal"},
+		"stock_type": {"a"},
+		"type":       {"hour"},
+		"list_type":  {"normal"},
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", _HOT_URL+"?"+params.Encode(), nil)
 	if err != nil {
@@ -92,7 +92,7 @@ func (a *THSAdapter) getHotRank(ctx context.Context, limit int) ([]map[string]in
 	}
 
 	var raw struct {
-		StatusCode int `json:"status_code"`
+		StatusCode int    `json:"status_code"`
 		StatusMsg  string `json:"status_msg"`
 		Data       struct {
 			StockList []map[string]interface{} `json:"stock_list"`
@@ -172,7 +172,7 @@ func (a *THSAdapter) enrichPrices(ctx context.Context, result []map[string]inter
 	}
 
 	var raw struct {
-		Rc  int `json:"rc"`
+		Rc   int `json:"rc"`
 		Data struct {
 			Diff []map[string]interface{} `json:"diff"`
 		} `json:"data"`

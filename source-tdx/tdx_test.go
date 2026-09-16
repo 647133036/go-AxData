@@ -1,20 +1,97 @@
 package tdx
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/zlib"
 	"context"
-	"errors"
+	"encoding/binary"
+	"io"
 	"net"
 	"strings"
 	"testing"
 	"time"
 )
 
-// TestTDXRequestReportsUnimplemented pins the adapter's failure mode: because
-// the 7709 response decoder is missing, every request must fail fast with a
-// message that names the adapter, rather than hanging until the network timeout.
-// A real local listener is used so connect() succeeds and the failure reaches
-// readRawResponse instead of being masked by a dial error.
-func TestTDXRequestReportsUnimplemented(t *testing.T) {
+// buildTDXReply encodes a 7709 reply frame the way a server would.
+func buildTDXReply(command uint16, control uint16, data []byte) []byte {
+	buf := make([]byte, int(RES_HEADER_SIZE)+len(data))
+	binary.LittleEndian.PutUint32(buf[1:], 0x11223344)
+	binary.LittleEndian.PutUint16(buf[5:], control)
+	binary.LittleEndian.PutUint16(buf[7:], uint16(len(data)))
+	binary.LittleEndian.PutUint16(buf[9:], uint16(len(data)+2))
+	binary.LittleEndian.PutUint16(buf[11:], command)
+	copy(buf[RES_HEADER_SIZE:], data)
+	return buf
+}
+
+// TestTDXRequestRoundTripAgainstLocalServer drives a real Request() through a
+// local server that speaks the wire protocol, proving the handshake, the
+// request frame, the response decoder and the parser all agree.
+func TestTDXRequestRoundTripAgainstLocalServer(t *testing.T) {
+	want := uint16(3)
+	seen := make(chan uint16, 8)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			head := make([]byte, RES_HEADER_SIZE)
+			if _, err := io.ReadFull(conn, head); err != nil {
+				return
+			}
+			cmd := binary.LittleEndian.Uint16(head[11:13])
+			payloadLen := int(binary.LittleEndian.Uint16(head[7:9]))
+			payload := make([]byte, payloadLen)
+			if _, err := io.ReadFull(conn, payload); err != nil {
+				return
+			}
+			seen <- cmd
+			if cmd == CMD_HANDSHAKE {
+				conn.Write(buildTDXReply(CMD_HANDSHAKE, RESP_CONTROL_PLAIN, make([]byte, 2)))
+			} else {
+				body := make([]byte, 2)
+				binary.LittleEndian.PutUint16(body, want)
+				conn.Write(buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, body))
+			}
+		}
+	}()
+
+	rows, err := NewTDXAdapter([]string{ln.Addr().String()}).Request(context.Background(), map[string]interface{}{
+		"interface": "security_count",
+		"market":    "sz",
+	})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows: got %d, want 1: %v", len(rows), rows)
+	}
+	if got := rows[0]["count"].(int); got != int(want) {
+		t.Fatalf("count: got %d, want %d", got, want)
+	}
+
+	// Handshake must precede the data request on the same connection.
+	if got := <-seen; got != CMD_HANDSHAKE {
+		t.Errorf("first command: got 0x%04X, want 0x%04X", got, CMD_HANDSHAKE)
+	}
+	if got := <-seen; got != CMD_SECURITY_COUNT {
+		t.Errorf("second command: got 0x%04X, want 0x%04X", got, CMD_SECURITY_COUNT)
+	}
+}
+
+// TestTDXRequestFailsFastOnSilentServer pins the failure mode when a server
+// accepts and never replies: the block happens in the header read, it is
+// surfaced as a read-path error, and it is bounded by the per-server deadline.
+func TestTDXRequestFailsFastOnSilentServer(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
@@ -26,26 +103,202 @@ func TestTDXRequestReportsUnimplemented(t *testing.T) {
 			if err != nil {
 				return
 			}
-			conn.Close()
+			go func() {
+				<-time.After(5 * time.Second)
+				conn.Close()
+			}()
 		}
 	}()
 
 	a := NewTDXAdapter([]string{ln.Addr().String()})
 	start := time.Now()
-	_, err = a.Request(context.Background(), map[string]interface{}{"interface": "handshake"})
+	_, err = a.Request(context.Background(), map[string]interface{}{"interface": "security_count"})
 	elapsed := time.Since(start)
 
 	if err == nil {
-		t.Fatal("expected an error from the unimplemented adapter")
+		t.Fatal("expected an error from a silent server")
 	}
-	if !errors.Is(err, errUnimplemented) {
-		t.Errorf("error %v, want errUnimplemented", err)
-	}
-	if !strings.Contains(err.Error(), "tdx adapter is not implemented") {
-		t.Errorf("error %q does not name the adapter", err.Error())
+	if !strings.Contains(err.Error(), "reading response header") {
+		t.Errorf("error %q does not name the read path", err.Error())
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("failed after %v; expected a fast failure", elapsed)
+	}
+}
+
+// TestEncodeRequestLengthMatchesFrame pins the frame-length invariant. A
+// conforming server reads the header's data_len bytes after the header, so if
+// data_len exceeds the bytes actually sent the server reads into the next
+// frame and the whole session desyncs.
+func TestEncodeRequestLengthMatchesFrame(t *testing.T) {
+	frame, err := encodeRequest(&WireRequest{Command: CMD_SECURITY_COUNT, Payload: []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}})
+	if err != nil {
+		t.Fatalf("encodeRequest: %v", err)
+	}
+	if len(frame) != int(REQ_HEADER_SIZE)+6 {
+		t.Fatalf("frame len: got %d, want %d", len(frame), int(REQ_HEADER_SIZE)+6)
+	}
+	dataLen := int(binary.LittleEndian.Uint16(frame[7:9]))
+	dataLenPlus := int(binary.LittleEndian.Uint16(frame[9:11]))
+	if dataLen != 6 {
+		t.Errorf("data_len: got %d, want 6", dataLen)
+	}
+	if dataLenPlus != 8 {
+		t.Errorf("data_len+2: got %d, want 8", dataLenPlus)
+	}
+	if dataLen != len(frame)-int(REQ_HEADER_SIZE) {
+		t.Errorf("data_len %d does not match the %d payload bytes sent", dataLen, len(frame)-int(REQ_HEADER_SIZE))
+	}
+}
+
+// pipeWith hands frame to the reader half and closes the writer half, so a
+// short frame surfaces as EOF instead of blocking ReadFull forever.
+func pipeWith(frame []byte) (io.Reader, func()) {
+	server, client := net.Pipe()
+	go func() {
+		server.Write(frame)
+		server.Close()
+	}()
+	return client, func() { client.Close() }
+}
+
+func TestReadRawResponsePlain(t *testing.T) {
+	payload := []byte{0x03, 0x00} // uint16(3)
+	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, payload)
+
+	client, close := pipeWith(frame)
+	defer close()
+
+	resp, err := readRawResponse(client, CMD_SECURITY_COUNT)
+	if err != nil {
+		t.Fatalf("readRawResponse: %v", err)
+	}
+	if resp.Command != CMD_SECURITY_COUNT {
+		t.Errorf("Command: got 0x%04X, want 0x%04X", resp.Command, CMD_SECURITY_COUNT)
+	}
+	if resp.MsgID != 0x11223344 {
+		t.Errorf("MsgID: got 0x%08X, want 0x11223344", resp.MsgID)
+	}
+	if !bytes.Equal(resp.Data, payload) {
+		t.Errorf("Data: got %v, want %v", resp.Data, payload)
+	}
+	if len(resp.RawData) != int(RES_HEADER_SIZE)+len(payload) {
+		t.Errorf("RawData len: got %d, want %d", len(resp.RawData), int(RES_HEADER_SIZE)+len(payload))
+	}
+	if binary.LittleEndian.Uint16(resp.Data) != 3 {
+		t.Errorf("payload parses as %d, want 3", binary.LittleEndian.Uint16(resp.Data))
+	}
+}
+
+func TestReadRawResponseCompressed(t *testing.T) {
+	payload := []byte{0x07, 0x00}
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_COMPRESSED, buf.Bytes())
+
+	client, close := pipeWith(frame)
+	defer close()
+
+	resp, err := readRawResponse(client, CMD_SECURITY_COUNT)
+	if err != nil {
+		t.Fatalf("readRawResponse: %v", err)
+	}
+	if !bytes.Equal(resp.Data, payload) {
+		t.Errorf("Data: got %v, want %v", resp.Data, payload)
+	}
+	if len(resp.RawData) != int(RES_HEADER_SIZE)+buf.Len() {
+		t.Errorf("RawData len: got %d, want %d (compressed wire bytes)", len(resp.RawData), int(RES_HEADER_SIZE)+buf.Len())
+	}
+}
+
+func TestReadRawResponseFailures(t *testing.T) {
+	base := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, []byte{0x01, 0x00})
+	overclaim := putUint16(base, 7, 4) // declares 4 payload bytes, only 2 follow
+
+	cases := []struct {
+		name    string
+		frame   []byte
+		wantCmd uint16
+		wantErr string
+	}{
+		{"truncated header", []byte{0x00, 0x44, 0x33, 0x22, 0x11}, CMD_SECURITY_COUNT, "header shorter"},
+		{"truncated payload", overclaim, CMD_SECURITY_COUNT, "payload shorter"},
+		{"command mismatch", buildTDXReply(CMD_SECURITY_LIST, RESP_CONTROL_PLAIN, []byte{0x00, 0x00}), CMD_SECURITY_COUNT, "does not match"},
+		{"length mismatch", putUint16(base, 9, 7), CMD_SECURITY_COUNT, "length fields disagree"},
+		{"unknown control", putUint16(base, 5, 0x0009), CMD_SECURITY_COUNT, "unknown control"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client, close := pipeWith(tc.frame)
+			defer close()
+			_, err := readRawResponse(client, tc.wantCmd)
+			if err == nil {
+				t.Fatalf("expected an error")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestReadRawResponseGarbagePayloadCompressed(t *testing.T) {
+	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_COMPRESSED, []byte{0x00, 0x00, 0x00})
+	client, close := pipeWith(frame)
+	defer close()
+
+	_, err := readRawResponse(client, CMD_SECURITY_COUNT)
+	if err == nil {
+		t.Fatal("expected a decompression error")
+	}
+	if !strings.Contains(err.Error(), "decompressing") {
+		t.Errorf("error %q does not name decompression", err.Error())
+	}
+}
+
+// putUint16 returns frame with a little-endian uint16 written at offset.
+func putUint16(frame []byte, offset int, v uint16) []byte {
+	out := append([]byte(nil), frame...)
+	binary.LittleEndian.PutUint16(out[offset:], v)
+	return out
+}
+
+func TestZlibDecompressRoundTrip(t *testing.T) {
+	payload := []byte{0x2a, 0x00, 0x00, 0x00}
+	var buf bytes.Buffer
+	zw := zlib.NewWriter(&buf)
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	got, err := zlibDecompress(buf.Bytes())
+	if err != nil {
+		t.Fatalf("zlibDecompress: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Errorf("got %v, want %v", got, payload)
+	}
+
+	// A raw deflate stream has no zlib header and must be rejected, so a
+	// compressed reply cannot be silently misread as a plain one.
+	var raw bytes.Buffer
+	dw, err := flate.NewWriter(&raw, flate.NoCompression)
+	if err != nil {
+		t.Fatalf("flate: %v", err)
+	}
+	dw.Write(payload)
+	dw.Close()
+	if _, err := zlibDecompress(raw.Bytes()); err == nil {
+		t.Error("zlibDecompress accepted a raw deflate stream")
 	}
 }
 
