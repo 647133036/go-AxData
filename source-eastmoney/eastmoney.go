@@ -190,7 +190,7 @@ func getParamInt(params map[string]interface{}, key string, defaultVal int) int 
 
 // parseCodeList parses codes from a comma/Chinese-comma/space-separated string.
 func parseCodeList(raw string) []string {
-	re := regexp.MustCompile(`[,\s，]+`)
+	re := codeListSepRe
 	parts := re.Split(raw, -1)
 	var codes []string
 	for _, p := range parts {
@@ -209,7 +209,7 @@ func parseCodeList(raw string) []string {
 		if len(c) >= 8 && (strings.HasPrefix(c, "SH") || strings.HasPrefix(c, "SZ") || strings.HasPrefix(c, "BJ")) {
 			c = c[2:]
 		}
-		if len(c) == 6 && regexp.MustCompile(`^\d{6}$`).MatchString(c) {
+		if len(c) == 6 && sixDigitRe.MatchString(c) {
 			codes = append(codes, c)
 		}
 	}
@@ -430,11 +430,11 @@ func floatVal(v interface{}) float64 {
 // dateFromValue extracts YYYYMMDD date from a value.
 func dateFromValue(v interface{}) string {
 	s := fmt.Sprintf("%v", v)
-	digits := regexp.MustCompile(`\d+`).FindAllString(s, -1)
+	digits := digitAllRe.FindAllString(s, -1)
 	if len(digits) > 0 {
 		s = strings.Join(digits, "")
 	}
-	re := regexp.MustCompile(`\d{4}\d{2}\d{2}`)
+	re := date8Re
 	m := re.FindString(s)
 	if m != "" {
 		return m[:8]
@@ -449,9 +449,9 @@ func cleanText(v interface{}) string {
 	}
 	s := fmt.Sprintf("%v", v)
 	// Remove HTML tags
-	s = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(s, "")
+	s = htmlTagRe.ReplaceAllString(s, "")
 	// Normalize whitespace
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	s = wsRunRe.ReplaceAllString(s, " ")
 	s = strings.TrimSpace(s)
 	return s
 }
@@ -459,7 +459,7 @@ func cleanText(v interface{}) string {
 // formatTime converts time value to HHMMSS string.
 func formatTime(v interface{}) string {
 	s := cleanText(v)
-	digits := regexp.MustCompile(`\d+`).FindAllString(s, -1)
+	digits := digitAllRe.FindAllString(s, -1)
 	if len(digits) == 0 {
 		return ""
 	}
@@ -1513,3 +1513,12 @@ func (a *EastMoneyAdapter) requestResearchReports(ctx context.Context, params ma
 
 	return normalized, nil
 }
+
+var (
+	digitAllRe    = regexp.MustCompile(`\d+`)
+	date8Re       = regexp.MustCompile(`\d{4}\d{2}\d{2}`)
+	htmlTagRe     = regexp.MustCompile(`<[^>]+>`)
+	wsRunRe       = regexp.MustCompile(`\s+`)
+	sixDigitRe    = regexp.MustCompile(`^\d{6}$`)
+	codeListSepRe = regexp.MustCompile(`[,\s，]+`)
+)

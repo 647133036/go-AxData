@@ -59,3 +59,13 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - Background terminals run zsh, not sh: bare globs and `grep --include=*.go` fail with `no matches found`. Quote the glob or drop the pattern.
   - Background terminal log files show 0 bytes while the command is running; poll `background_terminal_output_path` then read the file, and end commands with `; echo DONE` instead of `${PIPESTATUS[0]}`.
+
+[Project Knowledge Summary]
+- Date: 2026-09-16
+- Context: Discovered by Agent while auditing test assertions and collector task execution
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - The TDX adapter cannot decode any 7709 response: `readRawResponse` in source-tdx/tdx.go is a stub returning `errUnimplemented`, so every TDX request fails and collects 0 rows. `TestTDXRequestReportsUnimplemented` pins this. Do not spend time tuning TDX tasks or hosts until that decoder is written; `buildRequest` and the handshake encode correctly.
+  - `Collector.AddTask` creates tasks with `Enabled: false`, and `RunTask` refuses a disabled task before any work starts. A test that calls `RunTask` without `UpdateTask(id, {"enabled": true})` gets `task is disabled` and no run record, so it is not exercising the pipeline at all. Adapters must also be registered with `source.Register(...)` first, or the run fails with `unknown source: <id>`.
+  - `Collector.RunTask` returns the run's error as well as the run record. Asserting only on `run.Rows == 0` does not distinguish "collected nothing" from "never ran".
+  - A test that reuses one cobra command across multiple `ExecuteContext` calls leaks parsed flag values between cases (e.g. `--table` surviving from the previous subtest), which masks missing-flag validation. Build a fresh command per case; see `newTestRootCommand` in cmd/root_test.go.

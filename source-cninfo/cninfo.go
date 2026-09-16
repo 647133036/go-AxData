@@ -19,39 +19,39 @@ import (
 )
 
 var (
-	CNINFO_STOCK_INDEX_URL      = "https://www.cninfo.com.cn/new/data/szse_stock.json"
+	CNINFO_STOCK_INDEX_URL        = "https://www.cninfo.com.cn/new/data/szse_stock.json"
 	CNINFO_ANNOUNCEMENT_QUERY_URL = "https://www.cninfo.com.cn/new/hisAnnouncement/query"
-	CNINFO_STATIC_BASE          = "https://static.cninfo.com.cn/"
-	CNINFO_IRM_KEYWORD_URL      = "https://irm.cninfo.com.cn/newircs/index/queryKeyboardInfo"
-	CNINFO_IRM_QUESTION_URL     = "https://irm.cninfo.com.cn/newircs/company/question"
-	CNINFO_IRM_DETAIL_URL       = "https://irm.cninfo.com.cn/newircs/question/getQuestionDetail"
+	CNINFO_STATIC_BASE            = "https://static.cninfo.com.cn/"
+	CNINFO_IRM_KEYWORD_URL        = "https://irm.cninfo.com.cn/newircs/index/queryKeyboardInfo"
+	CNINFO_IRM_QUESTION_URL       = "https://irm.cninfo.com.cn/newircs/company/question"
+	CNINFO_IRM_DETAIL_URL         = "https://irm.cninfo.com.cn/newircs/question/getQuestionDetail"
 
-	WEBAPI_STOCK_PROFILE_URL       = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1133"
-	WEBAPI_STOCK_ALLOTMENT_URL     = "https://webapi.cninfo.com.cn/api/stock/p_stock2232"
-	WEBAPI_STOCK_DIVIDEND_URL      = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1139"
-	WEBAPI_STOCK_HOLD_CHANGE_URL   = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1029"
-	WEBAPI_STOCK_HOLD_CONTROL_URL  = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1033"
-	WEBAPI_STOCK_HOLD_NUM_URL      = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1034"
-	WEBAPI_STOCK_INDUSTRY_CATEGORY_URL = "https://webapi.cninfo.com.cn/api/stock/p_public0002"
-	WEBAPI_STOCK_INDUSTRY_PE_RATIO_URL = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1087"
-	WEBAPI_STOCK_RANK_FORECAST_URL = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1089"
-	WEBAPI_STOCK_IPO_SUMMARY_URL   = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1134"
-	WEBAPI_STOCK_NEW_GH_URL        = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1098"
-	WEBAPI_STOCK_NEW_IPO_URL       = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1097"
-	WEBAPI_STOCK_SHARE_CHANGE_URL  = "https://webapi.cninfo.com.cn/api/stock/p_stock2215"
-	WEBAPI_STOCK_INDUSTRY_CHANGE_URL = "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
-	WEBAPI_FUND_ASSET_ALLOCATION_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1114"
-	WEBAPI_FUND_INDUSTRY_ALLOCATION_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1113"
-	WEBAPI_FUND_STOCK_URL          = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1112"
-	WEBAPI_STOCK_CG_EQUITY_MORTGAGE_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1094"
-	WEBAPI_STOCK_CG_GUARANTEE_URL  = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1054"
-	WEBAPI_STOCK_CG_LAWSUIT_URL    = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1055"
+	WEBAPI_STOCK_PROFILE_URL                = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1133"
+	WEBAPI_STOCK_ALLOTMENT_URL              = "https://webapi.cninfo.com.cn/api/stock/p_stock2232"
+	WEBAPI_STOCK_DIVIDEND_URL               = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1139"
+	WEBAPI_STOCK_HOLD_CHANGE_URL            = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1029"
+	WEBAPI_STOCK_HOLD_CONTROL_URL           = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1033"
+	WEBAPI_STOCK_HOLD_NUM_URL               = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1034"
+	WEBAPI_STOCK_INDUSTRY_CATEGORY_URL      = "https://webapi.cninfo.com.cn/api/stock/p_public0002"
+	WEBAPI_STOCK_INDUSTRY_PE_RATIO_URL      = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1087"
+	WEBAPI_STOCK_RANK_FORECAST_URL          = "http://webapi.cninfo.com.cn/api/sysapi/p_sysapi1089"
+	WEBAPI_STOCK_IPO_SUMMARY_URL            = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1134"
+	WEBAPI_STOCK_NEW_GH_URL                 = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1098"
+	WEBAPI_STOCK_NEW_IPO_URL                = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1097"
+	WEBAPI_STOCK_SHARE_CHANGE_URL           = "https://webapi.cninfo.com.cn/api/stock/p_stock2215"
+	WEBAPI_STOCK_INDUSTRY_CHANGE_URL        = "https://webapi.cninfo.com.cn/api/stock/p_stock2110"
+	WEBAPI_FUND_ASSET_ALLOCATION_URL        = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1114"
+	WEBAPI_FUND_INDUSTRY_ALLOCATION_URL     = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1113"
+	WEBAPI_FUND_STOCK_URL                   = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1112"
+	WEBAPI_STOCK_CG_EQUITY_MORTGAGE_URL     = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1094"
+	WEBAPI_STOCK_CG_GUARANTEE_URL           = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1054"
+	WEBAPI_STOCK_CG_LAWSUIT_URL             = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1055"
 	WEBAPI_STOCK_HOLD_MANAGEMENT_DETAIL_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1030"
-	WEBAPI_BOND_CORPORATE_ISSUE_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1122"
-	WEBAPI_BOND_COV_ISSUE_URL      = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1123"
-	WEBAPI_BOND_COV_STOCK_ISSUE_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1124"
-	WEBAPI_BOND_LOCAL_GOVERNMENT_ISSUE_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1121"
-	WEBAPI_BOND_TREASURE_ISSUE_URL = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1120"
+	WEBAPI_BOND_CORPORATE_ISSUE_URL         = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1122"
+	WEBAPI_BOND_COV_ISSUE_URL               = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1123"
+	WEBAPI_BOND_COV_STOCK_ISSUE_URL         = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1124"
+	WEBAPI_BOND_LOCAL_GOVERNMENT_ISSUE_URL  = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1121"
+	WEBAPI_BOND_TREASURE_ISSUE_URL          = "https://webapi.cninfo.com.cn/api/sysapi/p_sysapi1120"
 
 	AES_KEY = []byte("1234567887654321")
 	AES_IV  = []byte("1234567887654321")
@@ -196,12 +196,31 @@ func (a *CNINFOAdapter) webapiFetch(ctx context.Context, method string, u string
 		return nil, fmt.Errorf("cninfo webapi response invalid JSON: %w", err)
 	}
 
-	resultCode, _ := payload["resultcode"].(string)
+	resultCode := resultCodeString(payload["resultcode"])
 	if resultCode != "" && resultCode != "200" && resultCode != "0" {
 		msg, _ := payload["resultmsg"]
 		return nil, fmt.Errorf("cninfo webapi error code=%s msg=%v", resultCode, msg)
 	}
 	return payload, nil
+}
+
+// resultCodeString renders a cninfo resultcode. The webapi returns it as a JSON
+// number as often as a string, so a string-only assertion reads "" and treats
+// every response as a success.
+func resultCodeString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case float64:
+		if t == float64(int64(t)) {
+			return strconv.FormatInt(int64(t), 10)
+		}
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }
 
 // formFetch sends a form-urlencoded POST to cninfo.com.cn.
@@ -780,9 +799,9 @@ func (a *CNINFOAdapter) requestIRMQuestions(ctx context.Context, params map[stri
 	keyword := paramString(params, "keyword")
 
 	query := url.Values{
-		"_t":      {"1691142650"},
+		"_t":        {"1691142650"},
 		"stockcode": {symbol},
-		"orgId":   {orgID},
+		"orgId":     {orgID},
 		"pageSize":  {strconv.Itoa(limit)},
 		"pageNum":   {strconv.Itoa(page)},
 		"keyWord":   {keyword},
@@ -960,11 +979,11 @@ func (a *CNINFOAdapter) resolveStock(ctx context.Context, symbol string) (map[st
 		return nil, nil
 	}
 	result := map[string]interface{}{
-		"symbol":      symbol,
+		"symbol":        symbol,
 		"instrument_id": instrumentIDFromSymbol(symbol),
-		"exchange":     exchangeFromSymbol(symbol),
-		"orgId":        stock["orgId"],
-		"name":         stock["zwjc"],
+		"exchange":      exchangeFromSymbol(symbol),
+		"orgId":         stock["orgId"],
+		"name":          stock["zwjc"],
 	}
 	return result, nil
 }
@@ -1266,7 +1285,7 @@ func cninfoDownloadURL(value string) string {
 // fileSizeFromHeaders parses file size from headers.
 func fileSizeFromHeaders(contentRange, contentLength string) interface{} {
 	if contentRange != "" {
-		match := regexp.MustCompile(`/(\d+)$`).FindStringSubmatch(contentRange)
+		match := contentRangeRe.FindStringSubmatch(contentRange)
 		if len(match) > 1 {
 			v, err := strconv.Atoi(match[1])
 			if err == nil {
@@ -1305,8 +1324,8 @@ func cleanText(value interface{}) string {
 		return ""
 	}
 	text := fmt.Sprintf("%v", value)
-	text = regexp.MustCompile(`<[^>]+>`).ReplaceAllString(text, "")
-	text = regexp.MustCompile(`\s+`).ReplaceAllString(text, " ")
+	text = htmlTagRe.ReplaceAllString(text, "")
+	text = wsRunRe.ReplaceAllString(text, " ")
 	return strings.TrimSpace(text)
 }
 
@@ -1394,7 +1413,7 @@ func normalizeDate(value interface{}) string {
 		return ""
 	}
 	s := cleanText(value)
-	digits := regexp.MustCompile(`\D`).ReplaceAllString(s, "")
+	digits := digitStripRe.ReplaceAllString(s, "")
 	if len(digits) >= 8 {
 		candidate := digits[:8]
 		_, err := time.Parse("20060102", candidate)
@@ -1417,74 +1436,74 @@ func paramDisclosureCategory(value string) string {
 }
 
 var cninfoDisclosureCategoryMap = map[string]string{
-	"年报":             "category_ndbg_szsh",
-	"半年报":           "category_bndbg_szsh",
-	"一季报":           "category_yjdbg_szsh",
-	"三季报":           "category_sjdbg_szsh",
-	"业绩预告":         "category_yjygjxz_szsh",
-	"权益分派":         "category_qyfpxzcs_szsh",
-	"董事会":           "category_dshgg_szsh",
-	"监事会":           "category_jshgg_szsh",
-	"股东大会":         "category_gddh_szsh",
-	"日常经营":         "category_rcjy_szsh",
-	"公司治理":         "category_gszl_szsh",
-	"中介报告":         "category_zj_szsh",
-	"首发":             "category_sf_szsh",
-	"增发":             "category_zf_szsh",
-	"股权激励":         "category_gqjl_szsh",
-	"配股":             "category_pg_szsh",
-	"解禁":             "category_jj_szsh",
-	"公司债":           "category_gszq_szsh",
-	"可转债":           "category_kzzq_szsh",
-	"其他融资":         "category_qtrz_szsh",
-	"股权变动":         "category_gqbd_szsh",
-	"补充更正":         "category_bcgz_szsh",
-	"澄清致歉":         "category_cqdq_szsh",
-	"风险提示":         "category_fxts_szsh",
-	"特别处理和退市":     "category_tbclts_szsh",
-	"退市整理期":       "category_tszlq_szsh",
+	"年报":      "category_ndbg_szsh",
+	"半年报":     "category_bndbg_szsh",
+	"一季报":     "category_yjdbg_szsh",
+	"三季报":     "category_sjdbg_szsh",
+	"业绩预告":    "category_yjygjxz_szsh",
+	"权益分派":    "category_qyfpxzcs_szsh",
+	"董事会":     "category_dshgg_szsh",
+	"监事会":     "category_jshgg_szsh",
+	"股东大会":    "category_gddh_szsh",
+	"日常经营":    "category_rcjy_szsh",
+	"公司治理":    "category_gszl_szsh",
+	"中介报告":    "category_zj_szsh",
+	"首发":      "category_sf_szsh",
+	"增发":      "category_zf_szsh",
+	"股权激励":    "category_gqjl_szsh",
+	"配股":      "category_pg_szsh",
+	"解禁":      "category_jj_szsh",
+	"公司债":     "category_gszq_szsh",
+	"可转债":     "category_kzzq_szsh",
+	"其他融资":    "category_qtrz_szsh",
+	"股权变动":    "category_gqbd_szsh",
+	"补充更正":    "category_bcgz_szsh",
+	"澄清致歉":    "category_cqdq_szsh",
+	"风险提示":    "category_fxts_szsh",
+	"特别处理和退市": "category_tbclts_szsh",
+	"退市整理期":   "category_tszlq_szsh",
 }
 
 var cninfoHoldChangeMarketMap = map[string]string{
 	"深市主板": "012002",
-	"沪市":     "012001",
-	"创业板":   "012015",
-	"科创板":   "012029",
-	"北交所":   "012046",
-	"全部":     "",
+	"沪市":   "012001",
+	"创业板":  "012015",
+	"科创板":  "012029",
+	"北交所":  "012046",
+	"全部":   "",
 }
 
 var cninfoHoldControlTypeMap = map[string]string{
-	"单独控制": "069001",
+	"单独控制":  "069001",
 	"实际控制人": "069002",
 	"一致行动人": "069003",
-	"家族控制": "069004",
-	"全部":     "",
+	"家族控制":  "069004",
+	"全部":    "",
 }
 
 var cninfoIndustryTypeMap = map[string]string{
-	"证监会行业分类标准": "008001",
+	"证监会行业分类标准":  "008001",
 	"巨潮行业分类标准":   "008002",
 	"申银万国行业分类标准": "008003",
-	"新财富行业分类标准":   "008004",
-	"国资委行业分类标准":   "008005",
-	"巨潮产业细分标准":     "008006",
-	"天相行业分类标准":     "008007",
-	"全球行业分类标准":     "008008",
+	"新财富行业分类标准":  "008004",
+	"国资委行业分类标准":  "008005",
+	"巨潮产业细分标准":   "008006",
+	"天相行业分类标准":   "008007",
+	"全球行业分类标准":   "008008",
 }
 
 var cninfoManagementChangeTypeMap = map[string]string{
 	"增持": "B",
 	"减持": "S",
-	"B":    "B",
-	"S":    "S",
+	"B":  "B",
+	"S":  "S",
 }
 
 var cninfoIndustryPEClassMap = map[string]string{
 	"证监会行业分类": "008001",
-	"国证行业分类":   "008200",
-	"008001":        "008001",
-	"008200":        "008200",
+	"国证行业分类":  "008200",
+	"008001":  "008001",
+	"008200":  "008200",
 }
 
 // FIELD DEFINITIONS
@@ -1958,3 +1977,9 @@ var WEBAPI_BOND_PUBLIC_ISSUE_FIELDS = []webapiField{
 	{"announcement_date", "DECLAREDATE", "date"},
 	{"bond_name", "BONDNAME", ""},
 }
+var (
+	digitStripRe   = regexp.MustCompile(`\D`)
+	htmlTagRe      = regexp.MustCompile(`<[^>]+>`)
+	wsRunRe        = regexp.MustCompile(`\s+`)
+	contentRangeRe = regexp.MustCompile(`/(\d+)$`)
+)

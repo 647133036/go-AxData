@@ -85,7 +85,7 @@ func (a *MockAdapter) generateDaily(symbol string, limit int) []map[string]inter
 			"pre_close":  open - 0.1,
 			"change":     close - (open - 0.1),
 			"pct_chg":    ((close - (open - 0.1)) / (open - 0.1)) * 100,
-			"vol":        float64(volume / 100),
+			"vol":        float64(volume) / 100,
 			"amount":     float64(volume) * close / 1000,
 		}
 		results = append(results, record)
@@ -185,9 +185,9 @@ func (a *MockAdapter) generateCalendar() []map[string]interface{} {
 		}
 
 		record := map[string]interface{}{
-			"exchange":     "SSE",
-			"cal_date":     date.Format("20060102"),
-			"is_open":      isOpen,
+			"exchange":      "SSE",
+			"cal_date":      date.Format("20060102"),
+			"is_open":       isOpen,
 			"pretrade_date": date.AddDate(0, 0, -1).Format("20060102"),
 		}
 		results = append(results, record)

@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -292,6 +293,12 @@ func (c *Collector) RunTask(ctx context.Context, taskID string) (*Run, error) {
 		c.logger.Error("save metadata failed", zap.Error(saveErr))
 	}
 
+	// Surface the execution error to the caller as well as the run record. A
+	// nil return would let a scheduled job and a CLI invocation report success
+	// for a run that collected nothing.
+	if r.Error != "" {
+		return r, errors.New(r.Error)
+	}
 	return r, nil
 }
 

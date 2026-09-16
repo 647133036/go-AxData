@@ -15,6 +15,9 @@ import (
 	"time"
 )
 
+// hqStrRe matches the var hq_str_<code>="..." line the quote endpoint returns.
+var hqStrRe = regexp.MustCompile(`var\s+hq_str_(\w+)="(.+)"`)
+
 // SinaAdapter implements the Sina Finance (新浪财经) API.
 type SinaAdapter struct {
 	baseURL     string
@@ -113,11 +116,11 @@ func (a *SinaAdapter) requestKline(ctx context.Context, symbol string, params ma
 func (a *SinaAdapter) requestRank(ctx context.Context) ([]map[string]interface{}, error) {
 	apiURL := "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeDataSimple"
 	qs := url.Values{
-		"page":  {"1"},
-		"num":   {"80"},
-		"sort":  {"symbol"},
-		"asc":   {"1"},
-		"node":  {"hs_s"},
+		"page": {"1"},
+		"num":  {"80"},
+		"sort": {"symbol"},
+		"asc":  {"1"},
+		"node": {"hs_s"},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"?"+qs.Encode(), nil)
@@ -200,8 +203,7 @@ func (a *SinaAdapter) requestHistory(ctx context.Context, symbol string, params 
 func (a *SinaAdapter) parseRealTime(raw string) ([]map[string]interface{}, error) {
 	var results []map[string]interface{}
 
-	re := regexp.MustCompile(`var\s+hq_str_(\w+)="(.+)"`)
-	matches := re.FindAllStringSubmatch(raw, -1)
+	matches := hqStrRe.FindAllStringSubmatch(raw, -1)
 
 	for _, match := range matches {
 		code := match[1]

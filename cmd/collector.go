@@ -250,9 +250,6 @@ func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) error {
 	fmt.Printf("Run ID:    %s\n", run.RunID)
 	fmt.Printf("Status:    %s\n", run.Status)
 	fmt.Printf("Rows:      %d\n", run.Rows)
-	if run.Error != "" {
-		fmt.Printf("Error:     %s\n", run.Error)
-	}
 	return nil
 }
 

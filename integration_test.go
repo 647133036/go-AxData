@@ -29,6 +29,8 @@ import (
 )
 
 func TestIntegration_AdapterToStorage(t *testing.T) {
+	source.Register(tdx.NewDefaultTDXAdapter())
+
 	tmpDir := "/tmp/test-axdata-integration-" + t.Name()
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })
 
@@ -54,12 +56,35 @@ func TestIntegration_AdapterToStorage(t *testing.T) {
 		t.Fatalf("AddTask failed: %v", err)
 	}
 
+	if err := collectorInst.UpdateTask(task.ID, map[string]interface{}{
+		"enabled": true,
+	}); err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err = collectorInst.RunTask(ctx, task.ID)
-	if err != nil {
-		t.Logf("RunTask returned expected error (no TDX server): %v", err)
+	// Tasks are created disabled, so without this the collector returns before
+	// the pipeline starts and no run record is written at all.
+	// Without a reachable TDX server the run must fail loudly. A nil error here
+	// would mean the pipeline never executed, so the assertion is required rather
+	// than a log line.
+	run, err := collectorInst.RunTask(ctx, task.ID)
+	if err == nil {
+		t.Fatalf("RunTask should fail without a reachable TDX server, got run %+v", run)
+	}
+	if run == nil {
+		t.Fatal("RunTask returned an error and no run record")
+	}
+	if run.Status != "failed" {
+		t.Errorf("run status: got %s, want failed", run.Status)
+	}
+	if run.Rows != 0 {
+		t.Errorf("failed run reported %d rows, want 0", run.Rows)
+	}
+	if run.Error == "" {
+		t.Error("failed run did not record its error")
 	}
 
 	retrieved, ok := collectorInst.GetTask(task.ID)
@@ -112,10 +137,13 @@ func TestIntegration_MockAdapterFullPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}
-
-	if run.Rows != 0 {
-		t.Logf("Inserted %d rows", run.Rows)
+	if run.Status != "success" {
+		t.Fatalf("run status: got %s, want success (error: %s)", run.Status, run.Error)
 	}
+	if run.Rows == 0 {
+		t.Fatal("the mock pipeline ran but inserted 0 rows")
+	}
+	t.Logf("Inserted %d rows", run.Rows)
 
 	// Verify parquet file was created
 	if !store.Exists("core", "daily") {
@@ -190,6 +218,9 @@ func TestIntegration_MockAdapterFullPipeline(t *testing.T) {
 	}
 	if cntInt < 1 {
 		t.Fatalf("Expected at least 1 row in parquet, got %d", cntInt)
+	}
+	if cntInt != int64(run.Rows) {
+		t.Errorf("collector reported %d rows but the parquet file holds %d", run.Rows, cntInt)
 	}
 	t.Logf("Queried %d rows from parquet daily table", cntInt)
 }
@@ -270,8 +301,14 @@ func TestIntegration_QueryWithSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTables failed: %v", err)
 	}
-	if len(tables) < 1 {
-		t.Fatal("Expected at least 1 table after creating 'daily'")
+	foundDaily := false
+	for _, tb := range tables {
+		if tb == "daily" {
+			foundDaily = true
+		}
+	}
+	if !foundDaily {
+		t.Fatalf("created table 'daily' is not listed: %v", tables)
 	}
 	t.Logf("Found %d tables after creating daily", len(tables))
 }

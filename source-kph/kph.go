@@ -781,7 +781,7 @@ func normalizeDate(params map[string]interface{}, required bool) (string, error)
 	if len(digits) != 8 {
 		return "", fmt.Errorf("trade_date must be YYYYMMDD or YYYY-MM-DD")
 	}
-	_, err := time.ParseInLocation("20060102", digits, time.Local)
+	_, err := time.ParseInLocation("20060102", digits, time.UTC)
 	if err != nil {
 		return "", fmt.Errorf("trade_date must be a valid date")
 	}
@@ -794,7 +794,7 @@ func historicalDate(params map[string]interface{}) (string, error) {
 		return "", err
 	}
 	date := strings.ReplaceAll(tradeDate, "-", "")
-	_, err = time.ParseInLocation("20060102", date, time.Local)
+	_, err = time.ParseInLocation("20060102", date, time.UTC)
 	if err != nil {
 		return "", fmt.Errorf("trade_date must be a valid date")
 	}

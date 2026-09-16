@@ -2,6 +2,7 @@ package mock
 
 import (
 	"context"
+	"math"
 	"testing"
 )
 
@@ -37,6 +38,19 @@ func TestMockDaily(t *testing.T) {
 		}
 		if _, ok := r["close"]; !ok {
 			t.Error("Missing close")
+		}
+
+		close := r["close"].(float64)
+		vol := r["vol"].(float64)
+		amount := r["amount"].(float64)
+		if vol <= 0 || amount <= 0 || close <= 0 {
+			t.Errorf("non-positive OHLCV component: close=%v vol=%v amount=%v", close, vol, amount)
+		}
+		// vol is volume/100 and amount is volume*close/1000, so amount must equal
+		// vol*close/10. This ties the two fields to the same source volume, which
+		// is what an integer-divided vol would break.
+		if got := vol * close / 10; math.Abs(got-amount) > amount*1e-6 {
+			t.Errorf("amount %v, want vol*close/10 = %v", amount, got)
 		}
 	}
 }

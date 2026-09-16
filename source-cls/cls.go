@@ -107,20 +107,20 @@ func (a *CLSAdapter) requestMarketEmotion(ctx context.Context) ([]map[string]int
 
 	return []map[string]interface{}{
 		{
-			"market_degree":       parseFloat(body["market_degree"]),
-			"shsz_balance":        cleanText(body["shsz_balance"]),
-			"preview_balance":     cleanText(body["preview_balance"]),
-			"up_ratio":            cleanText(body["up_ratio"]),
-			"up_ratio_num":        parseInt(body["up_ratio_num"]),
-			"up_open_num":         parseInt(body["up_open_num"]),
-			"performance":         cleanText(body["performance"]),
-			"rise_num":            parseInt(upDown["rise_num"]),
-			"fall_num":            parseInt(upDown["fall_num"]),
-			"flat_num":            parseInt(upDown["flat_num"]),
-			"up_num":              parseInt(upDown["up_num"]),
-			"down_num":            parseInt(upDown["down_num"]),
-			"raw_up_down_dis":     upDown,
-			"raw_limit_up_board":  board,
+			"market_degree":      parseFloat(body["market_degree"]),
+			"shsz_balance":       cleanText(body["shsz_balance"]),
+			"preview_balance":    cleanText(body["preview_balance"]),
+			"up_ratio":           cleanText(body["up_ratio"]),
+			"up_ratio_num":       parseInt(body["up_ratio_num"]),
+			"up_open_num":        parseInt(body["up_open_num"]),
+			"performance":        cleanText(body["performance"]),
+			"rise_num":           parseInt(upDown["rise_num"]),
+			"fall_num":           parseInt(upDown["fall_num"]),
+			"flat_num":           parseInt(upDown["flat_num"]),
+			"up_num":             parseInt(upDown["up_num"]),
+			"down_num":           parseInt(upDown["down_num"]),
+			"raw_up_down_dis":    upDown,
+			"raw_limit_up_board": board,
 		},
 	}, nil
 }
@@ -196,32 +196,32 @@ func (a *CLSAdapter) requestMarketMainline(ctx context.Context) ([]map[string]in
 	rows := make([]map[string]interface{}, 0)
 	for key, value := range body {
 		if vmap, ok := value.(map[string]interface{}); ok {
-				title := cleanText(vmap["title"])
-				if title == "" {
-					title = cleanText(vmap["name"])
-				}
-				summary := cleanText(vmap["desc"])
-				if summary == "" {
-					summary = cleanText(vmap["summary"])
-				}
-				if summary == "" {
-					summary = cleanText(vmap["interpret"])
-				}
-				rows = append(rows, map[string]interface{}{
-					"block_key": key,
-					"title":     title,
-					"summary":   summary,
-					"raw_item":  vmap,
-				})
-			} else if vlist, ok := value.([]interface{}); ok {
-				rows = append(rows, map[string]interface{}{
-					"block_key": key,
-					"title":     key,
-					"summary":   nil,
-					"raw_item":  vlist,
-				})
+			title := cleanText(vmap["title"])
+			if title == "" {
+				title = cleanText(vmap["name"])
 			}
+			summary := cleanText(vmap["desc"])
+			if summary == "" {
+				summary = cleanText(vmap["summary"])
+			}
+			if summary == "" {
+				summary = cleanText(vmap["interpret"])
+			}
+			rows = append(rows, map[string]interface{}{
+				"block_key": key,
+				"title":     title,
+				"summary":   summary,
+				"raw_item":  vmap,
+			})
+		} else if vlist, ok := value.([]interface{}); ok {
+			rows = append(rows, map[string]interface{}{
+				"block_key": key,
+				"title":     key,
+				"summary":   nil,
+				"raw_item":  vlist,
+			})
 		}
+	}
 	return rows, nil
 }
 
@@ -253,16 +253,16 @@ func (a *CLSAdapter) requestSectorList(ctx context.Context, secType, way string)
 			continue
 		}
 		results = append(results, map[string]interface{}{
-			"plate_code":        cleanText(m["secu_code"]),
-			"plate_name":        cleanText(m["secu_name"]),
-			"change_pct":        parseFloat(m["change"]),
-			"main_fund_diff":    parseFloat(m["main_fund_diff"]),
-			"rise_count":        parseInt(m["limit_up"]),
-			"fall_count":        parseInt(m["limit_down"]),
-			"limit_up_count":    parseInt(m["limit_up_num"]),
-			"limit_down_count":  parseInt(m["limit_down_num"]),
-			"trade_status":      cleanText(m["trade_status"]),
-			"raw_first_stock":   m["first_stock"],
+			"plate_code":       cleanText(m["secu_code"]),
+			"plate_name":       cleanText(m["secu_name"]),
+			"change_pct":       parseFloat(m["change"]),
+			"main_fund_diff":   parseFloat(m["main_fund_diff"]),
+			"rise_count":       parseInt(m["limit_up"]),
+			"fall_count":       parseInt(m["limit_down"]),
+			"limit_up_count":   parseInt(m["limit_up_num"]),
+			"limit_down_count": parseInt(m["limit_down_num"]),
+			"trade_status":     cleanText(m["trade_status"]),
+			"raw_first_stock":  m["first_stock"],
 		})
 	}
 	return results, nil
@@ -543,13 +543,16 @@ func (a *CLSAdapter) requestNewsTelegraph(ctx context.Context, params map[string
 		limit = 100
 	}
 
-	// Parse dateText as YYYYMMDD and compute day_start/day_end unix timestamps
-	date, err := time.ParseInLocation("20060102", dateText, time.Local)
+	// Parse dateText as YYYYMMDD and compute day_start/day_end unix timestamps.
+	// CLS encodes Beijing wall clock into epoch seconds, so UTC is the zone that
+	// reproduces those values on any host; time.Local shifted the window by 8h on
+	// machines set to Asia/Shanghai.
+	date, err := time.ParseInLocation("20060102", dateText, time.UTC)
 	if err != nil {
 		return nil, fmt.Errorf("invalid date format %s, use YYYYMMDD", dateText)
 	}
 	dayStart := date.Unix()
-	dayEnd := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, 0, time.Local).Unix()
+	dayEnd := time.Date(date.Year(), date.Month(), date.Day(), 23, 59, 59, 0, time.UTC).Unix()
 
 	sp := signedParams()
 	sp["refresh_type"] = "1"
@@ -770,7 +773,7 @@ func signedParams() map[string]string {
 // ─── Code conversion helpers ──────────────────────────────────────────
 
 var (
-	clsSecuRe = regexp.MustCompile(`^(sh|sz|bj)(\d{6})$`)
+	clsSecuRe  = regexp.MustCompile(`^(sh|sz|bj)(\d{6})$`)
 	sixDigitRe = regexp.MustCompile(`^\d{6}$`)
 )
 
@@ -900,7 +903,7 @@ func normalizeDateText(v interface{}) string {
 	if v == nil {
 		return ""
 	}
-	digits := regexp.MustCompile(`\D`).ReplaceAllString(fmt.Sprint(v), "")
+	digits := digitStripRe.ReplaceAllString(fmt.Sprint(v), "")
 	if len(digits) >= 8 {
 		return digits[:8]
 	}
@@ -980,3 +983,5 @@ func requiredText(params map[string]interface{}, name string) (string, error) {
 	}
 	return t, nil
 }
+
+var digitStripRe = regexp.MustCompile(`\D`)
