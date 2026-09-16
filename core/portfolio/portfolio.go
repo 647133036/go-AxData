@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"math"
 	"sort"
+
+	"gonum.org/v1/gonum/stat"
 )
 
 // ErrTooFewAssets is returned when the portfolio has fewer than two assets.
@@ -134,6 +136,9 @@ func volatility(series []float64) float64 {
 }
 
 func pearson(a, b []float64) float64 {
+	// Truncate to the common length: gonum requires equal-length inputs, and
+	// two securities can have different trading histories. A constant series
+	// yields NaN, which the callers treat as "no linear relationship".
 	n := len(a)
 	if n > len(b) {
 		n = len(b)
@@ -141,25 +146,11 @@ func pearson(a, b []float64) float64 {
 	if n < 2 {
 		return 0
 	}
-	var ma, mb float64
-	for i := 0; i < n; i++ {
-		ma += a[i]
-		mb += b[i]
-	}
-	ma /= float64(n)
-	mb /= float64(n)
-	var num, da, db float64
-	for i := 0; i < n; i++ {
-		x := a[i] - ma
-		y := b[i] - mb
-		num += x * y
-		da += x * x
-		db += y * y
-	}
-	if da <= 0 || db <= 0 {
+	r := stat.Correlation(a[:n], b[:n], nil)
+	if math.IsNaN(r) {
 		return 0
 	}
-	return num / math.Sqrt(da*db)
+	return r
 }
 
 func makeCorrelationMatrix(codes []string, series map[string][]float64) [][]float64 {

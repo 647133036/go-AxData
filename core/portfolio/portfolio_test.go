@@ -235,6 +235,26 @@ func TestPearsonConstantSeries(t *testing.T) {
 	}
 }
 
+func TestPearsonClosedForm(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b []float64
+		want float64
+	}{
+		{"perfect positive", []float64{1, 2, 3, 4, 5}, []float64{2, 4, 6, 8, 10}, 1},
+		{"perfect negative", []float64{1, 2, 3, 4, 5}, []float64{5, 4, 3, 2, 1}, -1},
+		// Trailing junk beyond the shorter series must be ignored, so the
+		// common-length truncation does not change the answer.
+		{"unequal length", []float64{1, 2, 3, 4, 5, 999}, []float64{5, 4, 3, 2, 1}, -1},
+		{"unequal positive", []float64{1, 2, 3, 4, 5, -1}, []float64{2, 4, 6, 8, 10}, 1},
+	}
+	for _, tc := range cases {
+		if got := pearson(tc.a, tc.b); math.Abs(got-tc.want) > 1e-9 {
+			t.Errorf("%s: got %.12f, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestVolatilityPositive(t *testing.T) {
 	if volatility([]float64{1, 1, 1, 1}) != 0 {
 		t.Fatal("constant series must have zero volatility")
