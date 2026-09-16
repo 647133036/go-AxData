@@ -131,8 +131,8 @@ curl "http://localhost:8080/api/query?sql=SELECT * FROM daily LIMIT 10"
 
 | 命令 | 说明 |
 |------|------|
-| `market quote CODE` | 实时行情快照：最新价、涨跌幅、换手率、量比、PE/PB、市值 |
-| `market watch --codes A,B,C` | 多标的横向对比，按涨跌幅排序，可筛选板块/市值 |
+| `market quote CODE` | 实时行情快照：最新价、涨跌幅、成交量额、换手率、PE/PB |
+| `market watch --codes A,B,C` | 多标的横向对比，按涨跌幅降序排列，含乖离率、日内区间与振幅 |
 | `market chart CODE` | 本地 K 线 + MA5/10/20 + RSI(14) + MACD 的 ASCII 图表，可导出 SVG |
 | `fundamental profile CODE` | 财务报表指标、主营构成（按维度分解）、估值快照、ROE 与盈利质量 |
 | `earnings report CODE` | 业绩预告与预告后实际业绩对比：变动幅度、是否超预期及原因说明 |

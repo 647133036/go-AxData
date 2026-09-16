@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/electkismet/axdata-go/core/chart"
@@ -66,7 +67,7 @@ func (r *RootCmd) runQuote(ctx context.Context, codes []string, isJSON bool) err
 		})
 	}
 	return emit(os.Stdout, false, nil,
-		[]string{"代码", "名称", "现价", "涨跌%", "成交量(万手)", "成交额", "换手%", "PE", "PB", "来源"}, rows)
+		[]string{"代码", "名称", "现价", "涨跌%", "成交量(万股)", "成交额", "换手%", "PE", "PB", "来源"}, rows)
 }
 
 func newMarketChartCmd(r *RootCmd) *cobra.Command {
@@ -219,6 +220,9 @@ func (r *RootCmd) runWatch(ctx context.Context, codes []string, limit int, isJSO
 	if len(items) == 0 {
 		return fmt.Errorf("no quote data returned")
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ChangePct > items[j].ChangePct
+	})
 	if isJSON {
 		return printJSON(os.Stdout, items)
 	}

@@ -142,6 +142,23 @@ func (r *RootCmd) runPortfolio(ctx context.Context, specs []string, bars int, is
 	}
 	emit(os.Stdout, false, nil, []string{"代码", "权重", "波动率", "风险贡献占比"}, rows)
 
+	if len(res.Codes) > 1 {
+		fmt.Println("\n相关性矩阵:")
+		matrixHeader := []string{""}
+		for _, c := range res.Codes {
+			matrixHeader = append(matrixHeader, c)
+		}
+		matrixRows := [][]string{}
+		for i, code := range res.Codes {
+			line := []string{code}
+			for j := range res.Codes {
+				line = append(line, fmt.Sprintf("%.2f", res.CorrelationMatrix[i][j]))
+			}
+			matrixRows = append(matrixRows, line)
+		}
+		emit(os.Stdout, false, nil, matrixHeader, matrixRows)
+	}
+
 	if len(res.HighCorrelationPairs) > 0 {
 		fmt.Printf("\n高相关配对 (相关性 > %.2f):\n", 0.8)
 		pairs := append([]portfolio.AssetPair(nil), res.HighCorrelationPairs...)
