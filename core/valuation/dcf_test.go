@@ -182,6 +182,59 @@ func TestDCFSensitivityGrid(t *testing.T) {
 	}
 }
 
+func TestDCFSensitivityMonotonic(t *testing.T) {
+	cash, a := baseInputs()
+	res, err := DCF(cash, a, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The grid layout is the contract the renderer relies on: one growth per
+	// row, one wacc per column. Assert it here so a relabelled renderer
+	// cannot pass review on the model's behalf.
+	for i, row := range res.Sensitivity {
+		g := row[0].Growth
+		for _, cell := range row {
+			if math.Abs(cell.Growth-g) > 1e-12 {
+				t.Fatalf("row %d mixes growth rates: %.6f vs %.6f", i, cell.Growth, g)
+			}
+		}
+	}
+	for j := range res.Sensitivity[0] {
+		w := res.Sensitivity[0][j].WACC
+		for i := range res.Sensitivity {
+			if math.Abs(res.Sensitivity[i][j].WACC-w) > 1e-12 {
+				t.Fatalf("col %d mixes wacc values: %.6f vs %.6f", j, res.Sensitivity[i][j].WACC, w)
+			}
+		}
+	}
+
+	// Value falls as WACC rises within a row, and rises as terminal growth
+	// rises down a column. Both directions must hold across every feasible
+	// cell, not just at the corners, or a transposed axis slips through.
+	for i, row := range res.Sensitivity {
+		for j, cell := range row {
+			if cell.Value == 0 {
+				continue
+			}
+			if j+1 < len(row) {
+				next := row[j+1]
+				if next.Value != 0 && !(cell.Value > next.Value) {
+					t.Fatalf("row %d: value should fall as wacc rises %.6f -> %.6f",
+						i, cell.Value, next.Value)
+				}
+			}
+			if i+1 < len(res.Sensitivity) {
+				up := res.Sensitivity[i+1][j]
+				if up.Value != 0 && !(up.Value > cell.Value) {
+					t.Fatalf("col %d: value should rise as growth rises %.6f -> %.6f",
+						j, cell.Value, up.Value)
+				}
+			}
+		}
+	}
+}
+
 func TestDCFSensitivitySkipsInfeasibleCells(t *testing.T) {
 	cash := CashFlows{FreeCashFlow: []float64{100}}
 	// WACC and growth are close enough that part of the sweep is infeasible.
