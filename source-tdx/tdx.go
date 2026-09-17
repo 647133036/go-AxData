@@ -16,30 +16,50 @@ import (
 	"unicode/utf8"
 )
 
-// TDX (通达信) 7709 binary protocol constants from upstream axdata_source_tdx.
+// TDX (通达信) 7709 binary protocol constants from upstream pytdx.
 const (
-	// Request frame
-	REQ_PREFIX      byte   = 0x0C
-	REQ_HEADER_SIZE uint32 = 13
-
-	// Response frame. Requests and replies share one 13-byte header layout:
+	// Request frame header = 12 bytes:
 	//
-	//	0x00  1    reserved          (0x0C on request, 0x00 on reply)
-	//	0x01  4    msg_id            uint32 LE
-	//	0x05  2    control           0x0001 plain, 0x0002 zlib payload
-	//	0x07  2    data_len          payload byte count
-	//	0x09  2    data_len + 2      payload plus the command field
-	//	0x0B  2    command           uint16 LE, echoed back
-	//	0x0D  n    payload
-	RES_HEADER_SIZE uint32 = 13
+	//	0x00  2    magic      uint16 LE (0x0C 0x01)
+	//	0x02  4    seq        uint32 LE
+	//	0x06  2    len1       uint16 LE = payload_len + 2
+	//	0x08  2    len2       uint16 LE = payload_len + 2 (must equal len1)
+	//	0x0A  2    command    uint16 LE
+	//	0x0C  n    payload
+	REQ_MAGIC       uint16 = 0x010C
+	REQ_HEADER_SIZE uint32 = 12
 
-	// Response control field values.
-	RESP_CONTROL_PLAIN      uint16 = 0x0001
-	RESP_CONTROL_COMPRESSED uint16 = 0x0002
+	// Response frame header = 16 bytes:
+	//
+	//	0x00  4    cookie     uint32 LE (echoed, ignored)
+	//	0x04  4    seq        uint32 LE (echoed)
+	//	0x08  2    status     uint16 LE (0 = OK)
+	//	0x0A  2    command    uint16 LE (echoed request cmd)
+	//	0x0C  2    zip_size   uint16 LE (on-wire body length)
+	//	0x0E  2    unzip_size uint16 LE (decompressed body length; ==zip_size means plain)
+	//	0x10  n    body       (zip_size bytes; zlib-decompress when zip != unzip)
+	RES_HEADER_SIZE uint32 = 16
 
 	// Environment variable for custom hosts (comma-separated "host:port").
 	ENV_TDX_HOSTS = "AXDATA_TDX_HOSTS"
 )
+
+// setupFrames are the three constant connect-setup frames pytdx sends before
+// any data command. Each is a complete 7709 frame (header + payload).
+var setupFrames = [][]byte{
+	// SetupCmd1
+	{0x0c, 0x02, 0x18, 0x93, 0x00, 0x01, 0x03, 0x00, 0x03, 0x00, 0x0d, 0x00, 0x01},
+	// SetupCmd2
+	{0x0c, 0x02, 0x18, 0x94, 0x00, 0x01, 0x03, 0x00, 0x03, 0x00, 0x0d, 0x00, 0x02},
+	// SetupCmd3 (login, cmd 0x0fdb, 32-byte broker payload)
+	{
+		0x0c, 0x03, 0x18, 0x99, 0x00, 0x01, 0x20, 0x00, 0x20, 0x00, 0xdb, 0x0f,
+		0xd5, 0xd0, 0xc9, 0xcc, 0xd6, 0xa4, 0xa8, 0xaf,
+		0x00, 0x00, 0x00, 0x8f, 0xc2, 0x25, 0x40, 0x13,
+		0x00, 0x00, 0xd5, 0x00, 0xc9, 0xcc, 0xbd, 0xf0,
+		0xd7, 0xea, 0x00, 0x00, 0x00, 0x02,
+	},
+}
 
 // Default host pools (var block — cannot use []string in const).
 var (
@@ -75,7 +95,7 @@ var (
 
 // Record sizes (from upstream _command_layouts).
 const (
-	CODE_RECORD_SIZE    = 37
+	CODE_RECORD_SIZE    = 29
 	FINANCE_BODY_SIZE   = 136
 	AUCTION_RECORD_SIZE = 16
 )
@@ -85,7 +105,8 @@ const (
 	CMD_HANDSHAKE                  uint16 = 0x000D
 	CMD_HEARTBEAT                  uint16 = 0x0004
 	CMD_SECURITY_COUNT             uint16 = 0x044E
-	CMD_SECURITY_LIST              uint16 = 0x044D
+	CMD_SECURITY_LIST              uint16 = 0x0450
+	CMD_FINANCE_INFO               uint16 = 0x0010
 	CMD_PRICE_LIMITS               uint16 = 0x0452
 	CMD_INTRADAY_SUBCHART          uint16 = 0x051B
 	CMD_KLINES                     uint16 = 0x052D
@@ -340,10 +361,8 @@ func (a *TDXAdapter) requestOnHost(ctx context.Context, addr string, cmd uint16,
 	defer conn.Close()
 	conn.SetDeadline(serverDeadline)
 
-	if cmd != CMD_HANDSHAKE {
-		if err := a.doHandshake(conn); err != nil {
-			return nil, fmt.Errorf("handshake on %s: %w", addr, err)
-		}
+	if err := a.doSetup(conn); err != nil {
+		return nil, fmt.Errorf("setup on %s: %w", addr, err)
 	}
 
 	req, err := buildRequest(a, cmdName, params)
@@ -390,13 +409,18 @@ func (a *TDXAdapter) resolveCommand(v interface{}) (uint16, error) {
 	}
 }
 
-// doHandshake sends 0x000D and waits for the response.
-func (a *TDXAdapter) doHandshake(conn net.Conn) error {
-	_, err := a.exchange(conn, &WireRequest{
-		Command: CMD_HANDSHAKE,
-		Payload: make([]byte, 2),
-	})
-	return err
+// doSetup sends the three constant connect-setup frames and drains each
+// response, mirroring pytdx TdxHq_API.setup().
+func (a *TDXAdapter) doSetup(conn net.Conn) error {
+	for _, frame := range setupFrames {
+		if _, err := conn.Write(frame); err != nil {
+			return fmt.Errorf("setup write: %w", err)
+		}
+		if err := drainResponse(conn); err != nil {
+			return fmt.Errorf("setup response: %w", err)
+		}
+	}
+	return nil
 }
 
 // exchange sends one frame and reads one response.
@@ -486,6 +510,8 @@ func parseRows(cmdName interface{}, resp *WireResponse) ([]map[string]interface{
 		return parseSTListRows(resp)
 	case "stock_suspensions_tdx":
 		return parseSuspensionRows(resp)
+	case "stock_finance_summary_tdx", "finance_info", "stock_share_capital_tdx", "stock_daily_share_tdx":
+		return parseFinanceInfoRows(resp)
 	case "stock_limit_ladder_tdx", "stock_theme_strength_rank_tdx":
 		return parseCategoryQuoteRows(resp)
 	default:
@@ -493,20 +519,18 @@ func parseRows(cmdName interface{}, resp *WireResponse) ([]map[string]interface{
 	}
 }
 
-// encodeRequest encodes a WireRequest into a 7709 request frame. The two
-// length fields are payload_len and payload_len+2 (payload plus the command
-// field); they must match the number of bytes actually sent, otherwise a
-// conforming server reads past the end of the frame.
+// encodeRequest encodes a WireRequest into a 7709 request frame (12-byte
+// header + payload). len1 and len2 both equal payload_len+2; a conforming
+// server reads exactly that many bytes after the header.
 func encodeRequest(req *WireRequest) ([]byte, error) {
 	msgID := generateMsgID()
 	payloadLen := uint16(len(req.Payload))
 	buf := make([]byte, int(REQ_HEADER_SIZE)+len(req.Payload))
-	buf[0] = REQ_PREFIX
-	binary.LittleEndian.PutUint32(buf[1:], msgID)
-	binary.LittleEndian.PutUint16(buf[5:], 1) // control = 1
-	binary.LittleEndian.PutUint16(buf[7:], payloadLen)
-	binary.LittleEndian.PutUint16(buf[9:], payloadLen+2)
-	binary.LittleEndian.PutUint16(buf[11:], req.Command)
+	binary.LittleEndian.PutUint16(buf[0:], REQ_MAGIC)
+	binary.LittleEndian.PutUint32(buf[2:], msgID)
+	binary.LittleEndian.PutUint16(buf[6:], payloadLen+2)
+	binary.LittleEndian.PutUint16(buf[8:], payloadLen+2)
+	binary.LittleEndian.PutUint16(buf[10:], req.Command)
 	copy(buf[REQ_HEADER_SIZE:], req.Payload)
 	return buf, nil
 }
@@ -514,14 +538,29 @@ func encodeRequest(req *WireRequest) ([]byte, error) {
 // Errors returned by the wire decoder. All of them name the failing field so a
 // reply that fails validation can be diagnosed without a packet capture.
 var (
-	errTDXHeaderTooShort = errors.New("tdx: response header shorter than 13 bytes")
+	errTDXHeaderTooShort = errors.New("tdx: response header shorter than 16 bytes")
 	errTDXPayloadShort   = errors.New("tdx: response payload shorter than declared length")
-	errTDXLengthMismatch = errors.New("tdx: response length fields disagree")
 	errTDXCommandEcho    = errors.New("tdx: response command does not match the request")
 )
 
+// drainResponse reads and discards one TDX response frame (used during setup).
+func drainResponse(r io.Reader) error {
+	head := make([]byte, RES_HEADER_SIZE)
+	if _, err := io.ReadFull(r, head); err != nil {
+		return fmt.Errorf("tdx: setup response header: %w", err)
+	}
+	zipSize := int(binary.LittleEndian.Uint16(head[12:14]))
+	if zipSize > 0 {
+		body := make([]byte, zipSize)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return fmt.Errorf("tdx: setup response body: %w", err)
+		}
+	}
+	return nil
+}
+
 // readRawResponse reads one TDX response frame from a connection and returns
-// it with the payload already decompressed, so parsers can read fixed-size
+// it with the body already decompressed, so parsers can read fixed-size
 // records straight out of Data.
 //
 // wantCommand is the command the request used; a mismatched echo means the
@@ -536,57 +575,53 @@ func readRawResponse(r io.Reader, wantCommand uint16) (*WireResponse, error) {
 		return nil, fmt.Errorf("tdx: reading response header: %w", err)
 	}
 
-	dataLen := int(binary.LittleEndian.Uint16(head[7:9]))
-	dataLenPlus := int(binary.LittleEndian.Uint16(head[9:11]))
-	if dataLenPlus > dataLen && dataLenPlus != dataLen+2 {
-		return nil, fmt.Errorf("%w: len1=%d len2=%d", errTDXLengthMismatch, dataLen, dataLenPlus)
-	}
+	zipSize := int(binary.LittleEndian.Uint16(head[12:14]))
+	unzipSize := int(binary.LittleEndian.Uint16(head[14:16]))
 
-	payload := make([]byte, dataLen)
-	if _, err := io.ReadFull(r, payload); err != nil {
+	body := make([]byte, zipSize)
+	if _, err := io.ReadFull(r, body); err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, fmt.Errorf("%w: declared %d bytes", errTDXPayloadShort, dataLen)
+			return nil, fmt.Errorf("%w: declared %d bytes", errTDXPayloadShort, zipSize)
 		}
-		return nil, fmt.Errorf("tdx: reading %d payload bytes: %w", dataLen, err)
+		return nil, fmt.Errorf("tdx: reading %d body bytes: %w", zipSize, err)
 	}
 
-	// RawData is the frame as it appeared on the wire, so it keeps the
-	// compressed bytes. Data is the decompressed payload.
-	wire := append(append(make([]byte, 0, int(RES_HEADER_SIZE)+dataLen), head...), payload...)
-
-	control := binary.LittleEndian.Uint16(head[5:7])
-	if control != RESP_CONTROL_PLAIN && control != RESP_CONTROL_COMPRESSED {
-		return nil, fmt.Errorf("tdx: unknown control field 0x%04X", control)
-	}
-	if control == RESP_CONTROL_COMPRESSED {
-		out, err := zlibDecompress(payload)
+	data := body
+	if zipSize != unzipSize {
+		out, err := zlibDecompress(body)
 		if err != nil {
-			return nil, fmt.Errorf("tdx: decompressing %d-byte payload: %w", dataLen, err)
+			return nil, fmt.Errorf("tdx: decompressing %d-byte body: %w", zipSize, err)
 		}
-		payload = out
+		data = out
 	}
 
-	got := binary.LittleEndian.Uint16(head[11:13])
+	got := binary.LittleEndian.Uint16(head[10:12])
 	if got != wantCommand {
 		return nil, fmt.Errorf("%w: sent 0x%04X, got 0x%04X", errTDXCommandEcho, wantCommand, got)
 	}
 
+	wire := append(append(make([]byte, 0, int(RES_HEADER_SIZE)+zipSize), head...), body...)
+
 	return &WireResponse{
 		Command: got,
-		MsgID:   binary.LittleEndian.Uint32(head[1:5]),
-		Data:    payload,
+		MsgID:   binary.LittleEndian.Uint32(head[4:8]),
+		Data:    data,
 		RawData: wire,
 	}, nil
 }
 
 // buildQuotesRequest builds a quote fetch request.
+// Payload (from pytdx GetSecurityQuotesCmd): 0x0005(u16) + 0(u32) + 0(u16)
+// + stock_len(u16) + per-stock entries (market(1B) + code(6B)).
 func buildQuotesRequest(params map[string]interface{}, explicit bool) (*WireRequest, error) {
 	secs := normalizeSecurities(params)
 	if len(secs) == 0 {
 		return nil, errors.New("quotes: at least one security required")
 	}
-	header := []byte{5, 0, 0, 0, 0, 0, 0, 0}
-	body := make([]byte, 0, 8+len(secs)*7)
+	header := make([]byte, 10)
+	binary.LittleEndian.PutUint16(header[0:], 0x0005)
+	binary.LittleEndian.PutUint16(header[8:], uint16(len(secs)))
+	body := make([]byte, 0, 10+len(secs)*7)
 	body = append(body, header...)
 	for _, s := range secs {
 		body = append(body, s.market)
@@ -615,48 +650,50 @@ func buildCategoryQuotesRequest(params map[string]interface{}) (*WireRequest, er
 }
 
 // buildSecurityListRequest builds a security list request.
+// Payload: market(u16) + start(u16) — 4 bytes total (from pytdx get_security_list).
 func buildSecurityListRequest(params map[string]interface{}) (*WireRequest, error) {
 	market := uint16(marketFromString(strval(params, "market", "sz")))
-	start := uint32(intval(params, "start", 0))
-	limit := uint32(intval(params, "limit", 1600))
-	buf := make([]byte, 12)
+	start := uint16(intval(params, "start", 0))
+	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint16(buf[0:], market)
-	binary.LittleEndian.PutUint32(buf[2:], start)
-	binary.LittleEndian.PutUint32(buf[6:], limit)
+	binary.LittleEndian.PutUint16(buf[2:], start)
 	return &WireRequest{Command: CMD_SECURITY_LIST, Payload: buf}, nil
 }
 
 // buildSecurityCountRequest builds a security count request.
+// Payload: market(u16) + 0x75C73301 trailer (required by the TDX server).
 func buildSecurityCountRequest(params map[string]interface{}) (*WireRequest, error) {
 	market := uint16(marketFromString(strval(params, "market", "sz")))
 	buf := make([]byte, 6)
 	binary.LittleEndian.PutUint16(buf[0:], market)
-	_ = intval(params, "client_date", 0)
+	// Constant trailer required by the server (from pytdx get_security_count).
+	buf[2], buf[3], buf[4], buf[5] = 0x75, 0xC7, 0x33, 0x01
 	return &WireRequest{Command: CMD_SECURITY_COUNT, Payload: buf}, nil
 }
 
 // buildKlineRequest builds a kline fetch request.
+// Payload (26 bytes, from pytdx GetSecurityBarsCmd):
+//
+//	market(u16) + code(6B) + category(u16) + 1(u16) + start(u16) + count(u16) + 0(u32) + 0(u32) + 0(u16)
 func buildKlineRequest(iface string, params map[string]interface{}) (*WireRequest, error) {
 	market, code, err := parseCode(params)
 	if err != nil {
 		return nil, err
 	}
-	period := periodPairForInterface(iface, params)
+	category := periodPairForInterface(iface, params).Period
 	start := uint16(intval(params, "start", 0))
 	count := uint16(intval(params, "count", 800))
 	if count == 0 {
 		return nil, errors.New("count must be > 0")
 	}
-	adjust := uint16(intval(params, "adjust", 0))
-	buf := make([]byte, 22)
+	buf := make([]byte, 26)
 	binary.LittleEndian.PutUint16(buf[0:], market)
 	copy(buf[2:8], []byte(code))
-	binary.LittleEndian.PutUint16(buf[8:], start)
-	binary.LittleEndian.PutUint16(buf[10:], count)
-	binary.LittleEndian.PutUint16(buf[12:], adjust)
-	// period encoding
-	periodBytes := period.Period
-	binary.LittleEndian.PutUint16(buf[14:], periodBytes)
+	binary.LittleEndian.PutUint16(buf[8:], category)
+	binary.LittleEndian.PutUint16(buf[10:], 1)
+	binary.LittleEndian.PutUint16(buf[12:], start)
+	binary.LittleEndian.PutUint16(buf[14:], count)
+	// buf[16:26] = 10 zero bytes (padding fields required by the server)
 	return &WireRequest{Command: CMD_KLINES, Payload: buf}, nil
 }
 
@@ -671,16 +708,18 @@ func buildPriceLimitsRequest(params map[string]interface{}) (*WireRequest, error
 	return &WireRequest{Command: CMD_PRICE_LIMITS, Payload: buf}, nil
 }
 
-// buildFinanceInfoRequest builds a file-content request for finance data.
+// buildFinanceInfoRequest builds a finance-info request (cmd 0x0010).
+// Payload (from pytdx GetFinanceInfo): 0x0001(u16) + market(u8) + code(6B) = 9 bytes.
 func buildFinanceInfoRequest(params map[string]interface{}) (*WireRequest, error) {
 	market, code, err := parseCode(params)
 	if err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint16(buf[0:], market)
-	copy(buf[2:8], []byte(code))
-	return &WireRequest{Command: CMD_FILE_CONTENT, Payload: buf}, nil
+	buf := make([]byte, 9)
+	binary.LittleEndian.PutUint16(buf[0:], 0x0001)
+	buf[2] = byte(market)
+	copy(buf[3:9], []byte(code))
+	return &WireRequest{Command: CMD_FINANCE_INFO, Payload: buf}, nil
 }
 
 // buildTodayTradesRequest builds a today trades request.
@@ -798,22 +837,20 @@ func parseSecurityListRows(resp *WireResponse) ([]map[string]interface{}, error)
 		base := 2 + i*CODE_RECORD_SIZE
 		rec := data[base : base+CODE_RECORD_SIZE]
 		code := ascii2str(rec[:6])
-		multiple := binary.LittleEndian.Uint16(rec[6:8])
-		name := gbk2str(rec[8:24])
-		decimal := rec[28]
-		unknown0 := math.Float32frombits(binary.LittleEndian.Uint32(rec[24:28]))
-		prec := math.Float32frombits(binary.LittleEndian.Uint32(rec[29:33]))
+		volunit := binary.LittleEndian.Uint16(rec[6:8])
+		name := gbk2str(rec[8:16])
+		decimal := rec[20]
+		preCloseRaw := binary.LittleEndian.Uint32(rec[21:25])
 
 		rows = append(rows, map[string]interface{}{
-			"instrument_id":     fmt.Sprintf("%s.SZ", code),
-			"symbol":            code,
-			"tdx_code":          "sz" + code,
-			"exchange":          "SZSE",
-			"name":              name,
-			"multiple":          multiple,
-			"decimal":           int(decimal),
-			"previous_close":    prec,
-			"volume_ratio_base": unknown0,
+			"instrument_id": fmt.Sprintf("%s.SZ", code),
+			"symbol":        code,
+			"tdx_code":      "sz" + code,
+			"exchange":      "SZSE",
+			"name":          name,
+			"volunit":       volunit,
+			"decimal_point": int(decimal),
+			"pre_close":     compactFloat(int(preCloseRaw)),
 		})
 	}
 	return rows, nil
@@ -828,6 +865,82 @@ func parseSecurityCountRows(resp *WireResponse) ([]map[string]interface{}, error
 	return []map[string]interface{}{
 		{"count": int(count)},
 	}, nil
+}
+
+// parseFinanceInfoRows parses a finance-info response (cmd 0x0010).
+// Body layout (from pytdx GetFinanceInfo.parseResponse):
+//
+//	2 bytes  skip (ret_count, always 1)
+//	1 byte   market
+//	6 bytes  code
+//	4 bytes  liutongguben (float32, ×10000)
+//	2 bytes  province (uint16)
+//	2 bytes  industry (uint16)
+//	4 bytes  updated_date (uint32, YYYYMMDD)
+//	4 bytes  ipo_date (uint32, YYYYMMDD)
+//	29×4 bytes  float32 financial fields (each ×10000 except gudongrenshu and the last two)
+func parseFinanceInfoRows(resp *WireResponse) ([]map[string]interface{}, error) {
+	data := resp.Data
+	if len(data) < 2+7+16 {
+		return nil, errors.New("finance info: payload too short")
+	}
+	pos := 2 // skip ret_count
+	market := data[pos]
+	code := ascii2str(data[pos+1 : pos+7])
+	pos += 7
+
+	f32 := func() float32 {
+		v := math.Float32frombits(binary.LittleEndian.Uint32(data[pos : pos+4]))
+		pos += 4
+		return v
+	}
+	u16 := func() uint16 {
+		v := binary.LittleEndian.Uint16(data[pos : pos+2])
+		pos += 2
+		return v
+	}
+	u32 := func() uint32 {
+		v := binary.LittleEndian.Uint32(data[pos : pos+4])
+		pos += 4
+		return v
+	}
+
+	liutongguben := f32()
+	province := u16()
+	industry := u16()
+	updatedDate := u32()
+	ipoDate := u32()
+
+	fields := []string{
+		"zongguben", "guojiagu", "faqirenfarengu", "farengu",
+		"bgu", "hgu", "zhigonggu", "zongzichan",
+		"liudongzichan", "gudingzichan", "wuxingzichan", "gudongrenshu",
+		"liudongfuzhai", "changqifuzhai", "zibengongjijin", "jingzichan",
+		"zhuyingshouru", "zhuyinglirun", "yingshouzhangkuan", "yingyelirun",
+		"touzishouyu", "jingyingxianjinliu", "zongxianjinliu", "cunhuo",
+		"lirunzonghe", "shuihoulirun", "jinglirun", "weifenpeilirun",
+		"meigujingzichan", "baoliu2",
+	}
+
+	row := map[string]interface{}{
+		"market":       int(market),
+		"code":         code,
+		"liutongguben": float64(liutongguben) * 10000,
+		"province":     int(province),
+		"industry":     int(industry),
+		"updated_date": int(updatedDate),
+		"ipo_date":     int(ipoDate),
+	}
+	for _, name := range fields {
+		v := f32()
+		switch name {
+		case "gudongrenshu", "meigujingzichan", "baoliu2":
+			row[name] = float64(v)
+		default:
+			row[name] = float64(v) * 10000
+		}
+	}
+	return []map[string]interface{}{row}, nil
 }
 
 func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{}, error) {
@@ -1211,13 +1324,14 @@ func commandFromString(name string) (uint16, error) {
 		"etf_auction_process_tdx":           CMD_AUCTION_PROCESS,
 		"stock_auction_process_tdx":         CMD_AUCTION_PROCESS,
 		"file_content":                      CMD_FILE_CONTENT,
-		"stock_finance_summary_tdx":         CMD_FILE_CONTENT,
 		"stock_finance_profile_tdx":         CMD_FILE_CONTENT,
 		"stock_balance_summary_tdx":         CMD_FILE_CONTENT,
 		"stock_profit_cashflow_summary_tdx": CMD_FILE_CONTENT,
 		"stock_finance_profile":             CMD_FILE_CONTENT,
-		"stock_share_capital_tdx":           CMD_FILE_CONTENT,
-		"stock_daily_share_tdx":             CMD_FILE_CONTENT,
+		"finance_info":                      CMD_FINANCE_INFO,
+		"stock_finance_summary_tdx":         CMD_FINANCE_INFO,
+		"stock_share_capital_tdx":           CMD_FINANCE_INFO,
+		"stock_daily_share_tdx":             CMD_FINANCE_INFO,
 		"stock_suspensions_tdx":             CMD_SECURITY_LIST,
 		"stock_codes_tdx":                   CMD_SECURITY_LIST,
 		"stock_st_list_tdx":                 CMD_SECURITY_LIST,
@@ -1275,18 +1389,27 @@ func periodPairForInterface(iface string, params map[string]interface{}) PeriodP
 
 func parseCode(params map[string]interface{}) (uint16, string, error) {
 	c := strval(params, "code", "")
-	m := strval(params, "market", "")
-	// Normalize code: "000001" -> "sz000001", "000001.SZ" -> "sz000001"
-	if len(c) == 8 && (c[:2] == "sz" || c[:2] == "sh" || c[:2] == "bj") {
-		m = c[:2]
-		c = c[2:]
+	if c == "" {
+		c = strval(params, "stock_code", "")
 	}
-	if len(c) == 6 && c[4:] == ".SZ" {
-		c = c[:4]
+	if c == "" {
+		c = strval(params, "symbol", "")
+	}
+	m := strval(params, "market", "")
+	// Normalize code: "sz000001" -> ("sz", "000001"), "000001.SZ" -> ("sz", "000001")
+	if len(c) >= 8 && (c[:2] == "sz" || c[:2] == "sh" || c[:2] == "bj") {
+		m = c[:2]
+		c = c[2:8]
+	}
+	if strings.HasSuffix(c, ".SZ") {
+		c = c[:len(c)-3]
 		m = "sz"
-	} else if len(c) == 6 && c[4:] == ".SH" {
-		c = c[:4]
+	} else if strings.HasSuffix(c, ".SH") {
+		c = c[:len(c)-3]
 		m = "sh"
+	} else if strings.HasSuffix(c, ".BJ") {
+		c = c[:len(c)-3]
+		m = "bj"
 	}
 	if m == "" {
 		m = "sz"

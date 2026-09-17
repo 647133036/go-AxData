@@ -29,7 +29,7 @@ import (
 )
 
 func TestIntegration_AdapterToStorage(t *testing.T) {
-	source.Register(tdx.NewDefaultTDXAdapter())
+	source.Register(tdx.NewTDXAdapter([]string{"127.0.0.1:1"})) // bogus host → connection refused
 
 	tmpDir := "/tmp/test-axdata-integration-" + t.Name()
 	t.Cleanup(func() { os.RemoveAll(tmpDir) })

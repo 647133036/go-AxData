@@ -13,20 +13,57 @@ import (
 	"time"
 )
 
-// buildTDXReply encodes a 7709 reply frame the way a server would.
-func buildTDXReply(command uint16, control uint16, data []byte) []byte {
+// buildTDXReply encodes a 7709 reply frame (16-byte header + plain body).
+func buildTDXReply(command uint16, data []byte) []byte {
 	buf := make([]byte, int(RES_HEADER_SIZE)+len(data))
-	binary.LittleEndian.PutUint32(buf[1:], 0x11223344)
-	binary.LittleEndian.PutUint16(buf[5:], control)
-	binary.LittleEndian.PutUint16(buf[7:], uint16(len(data)))
-	binary.LittleEndian.PutUint16(buf[9:], uint16(len(data)+2))
-	binary.LittleEndian.PutUint16(buf[11:], command)
+	binary.LittleEndian.PutUint32(buf[0:], 0x11223344)         // cookie
+	binary.LittleEndian.PutUint32(buf[4:], 0x11223344)         // seq echo
+	binary.LittleEndian.PutUint16(buf[8:], 0)                  // status = 0
+	binary.LittleEndian.PutUint16(buf[10:], command)           // cmd echo
+	binary.LittleEndian.PutUint16(buf[12:], uint16(len(data))) // zipsize
+	binary.LittleEndian.PutUint16(buf[14:], uint16(len(data))) // unzipsize (= zipsize → plain)
 	copy(buf[RES_HEADER_SIZE:], data)
 	return buf
 }
 
+// buildTDXReplyCompressed encodes a 7709 reply frame with a zlib-compressed
+// body (zipsize != unzipsize).
+func buildTDXReplyCompressed(command uint16, data []byte) []byte {
+	var buf2 bytes.Buffer
+	zw := zlib.NewWriter(&buf2)
+	zw.Write(data)
+	zw.Close()
+	body := buf2.Bytes()
+	buf := make([]byte, int(RES_HEADER_SIZE)+len(body))
+	binary.LittleEndian.PutUint32(buf[0:], 0x11223344)
+	binary.LittleEndian.PutUint32(buf[4:], 0x11223344)
+	binary.LittleEndian.PutUint16(buf[8:], 0)
+	binary.LittleEndian.PutUint16(buf[10:], command)
+	binary.LittleEndian.PutUint16(buf[12:], uint16(len(body))) // zipsize (compressed)
+	binary.LittleEndian.PutUint16(buf[14:], uint16(len(data))) // unzipsize (original)
+	copy(buf[RES_HEADER_SIZE:], body)
+	return buf
+}
+
+// drainSetupFrame reads one 12-byte request frame (header + payload) from the
+// fake server side, mirroring what a real TDX server does during setup.
+func drainSetupFrame(conn net.Conn) error {
+	head := make([]byte, REQ_HEADER_SIZE)
+	if _, err := io.ReadFull(conn, head); err != nil {
+		return err
+	}
+	payloadLen := int(binary.LittleEndian.Uint16(head[6:8])) - 2
+	if payloadLen > 0 {
+		payload := make([]byte, payloadLen)
+		if _, err := io.ReadFull(conn, payload); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TestTDXRequestRoundTripAgainstLocalServer drives a real Request() through a
-// local server that speaks the wire protocol, proving the handshake, the
+// local server that speaks the wire protocol, proving the 3-frame setup, the
 // request frame, the response decoder and the parser all agree.
 func TestTDXRequestRoundTripAgainstLocalServer(t *testing.T) {
 	want := uint16(3)
@@ -43,26 +80,30 @@ func TestTDXRequestRoundTripAgainstLocalServer(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		for {
-			head := make([]byte, RES_HEADER_SIZE)
-			if _, err := io.ReadFull(conn, head); err != nil {
+		// Drain 3 setup frames, reply to each with an empty 16-byte response.
+		for i := 0; i < 3; i++ {
+			if err := drainSetupFrame(conn); err != nil {
 				return
 			}
-			cmd := binary.LittleEndian.Uint16(head[11:13])
-			payloadLen := int(binary.LittleEndian.Uint16(head[7:9]))
+			conn.Write(buildTDXReply(0, []byte{}))
+		}
+		// Read the actual command frame.
+		head := make([]byte, REQ_HEADER_SIZE)
+		if _, err := io.ReadFull(conn, head); err != nil {
+			return
+		}
+		cmd := binary.LittleEndian.Uint16(head[10:12])
+		payloadLen := int(binary.LittleEndian.Uint16(head[6:8])) - 2
+		if payloadLen > 0 {
 			payload := make([]byte, payloadLen)
 			if _, err := io.ReadFull(conn, payload); err != nil {
 				return
 			}
-			seen <- cmd
-			if cmd == CMD_HANDSHAKE {
-				conn.Write(buildTDXReply(CMD_HANDSHAKE, RESP_CONTROL_PLAIN, make([]byte, 2)))
-			} else {
-				body := make([]byte, 2)
-				binary.LittleEndian.PutUint16(body, want)
-				conn.Write(buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, body))
-			}
 		}
+		seen <- cmd
+		body := make([]byte, 2)
+		binary.LittleEndian.PutUint16(body, want)
+		conn.Write(buildTDXReply(CMD_SECURITY_COUNT, body))
 	}()
 
 	rows, err := NewTDXAdapter([]string{ln.Addr().String()}).Request(context.Background(), map[string]interface{}{
@@ -79,12 +120,8 @@ func TestTDXRequestRoundTripAgainstLocalServer(t *testing.T) {
 		t.Fatalf("count: got %d, want %d", got, want)
 	}
 
-	// Handshake must precede the data request on the same connection.
-	if got := <-seen; got != CMD_HANDSHAKE {
-		t.Errorf("first command: got 0x%04X, want 0x%04X", got, CMD_HANDSHAKE)
-	}
 	if got := <-seen; got != CMD_SECURITY_COUNT {
-		t.Errorf("second command: got 0x%04X, want 0x%04X", got, CMD_SECURITY_COUNT)
+		t.Errorf("command: got 0x%04X, want 0x%04X", got, CMD_SECURITY_COUNT)
 	}
 }
 
@@ -118,7 +155,7 @@ func TestTDXRequestFailsFastOnSilentServer(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error from a silent server")
 	}
-	if !strings.Contains(err.Error(), "reading response header") {
+	if !strings.Contains(err.Error(), "response header") {
 		t.Errorf("error %q does not name the read path", err.Error())
 	}
 	if elapsed > 5*time.Second {
@@ -126,10 +163,10 @@ func TestTDXRequestFailsFastOnSilentServer(t *testing.T) {
 	}
 }
 
-// TestEncodeRequestLengthMatchesFrame pins the frame-length invariant. A
-// conforming server reads the header's data_len bytes after the header, so if
-// data_len exceeds the bytes actually sent the server reads into the next
-// frame and the whole session desyncs.
+// TestEncodeRequestLengthMatchesFrame pins the frame-length invariant. The two
+// length fields (len1 and len2 at offsets [6:8] and [8:10]) both equal
+// payload_len+2; a conforming server reads payload_len bytes after the
+// 12-byte header.
 func TestEncodeRequestLengthMatchesFrame(t *testing.T) {
 	frame, err := encodeRequest(&WireRequest{Command: CMD_SECURITY_COUNT, Payload: []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00}})
 	if err != nil {
@@ -138,16 +175,20 @@ func TestEncodeRequestLengthMatchesFrame(t *testing.T) {
 	if len(frame) != int(REQ_HEADER_SIZE)+6 {
 		t.Fatalf("frame len: got %d, want %d", len(frame), int(REQ_HEADER_SIZE)+6)
 	}
-	dataLen := int(binary.LittleEndian.Uint16(frame[7:9]))
-	dataLenPlus := int(binary.LittleEndian.Uint16(frame[9:11]))
-	if dataLen != 6 {
-		t.Errorf("data_len: got %d, want 6", dataLen)
+	len1 := int(binary.LittleEndian.Uint16(frame[6:8]))
+	len2 := int(binary.LittleEndian.Uint16(frame[8:10]))
+	if len1 != 8 {
+		t.Errorf("len1: got %d, want 8", len1)
 	}
-	if dataLenPlus != 8 {
-		t.Errorf("data_len+2: got %d, want 8", dataLenPlus)
+	if len2 != 8 {
+		t.Errorf("len2: got %d, want 8", len2)
 	}
-	if dataLen != len(frame)-int(REQ_HEADER_SIZE) {
-		t.Errorf("data_len %d does not match the %d payload bytes sent", dataLen, len(frame)-int(REQ_HEADER_SIZE))
+	if len1 != len(frame)-int(REQ_HEADER_SIZE)+2 {
+		t.Errorf("len1 %d does not match payload+2", len1)
+	}
+	cmd := binary.LittleEndian.Uint16(frame[10:12])
+	if cmd != CMD_SECURITY_COUNT {
+		t.Errorf("cmd: got 0x%04X, want 0x%04X", cmd, CMD_SECURITY_COUNT)
 	}
 }
 
@@ -164,7 +205,7 @@ func pipeWith(frame []byte) (io.Reader, func()) {
 
 func TestReadRawResponsePlain(t *testing.T) {
 	payload := []byte{0x03, 0x00} // uint16(3)
-	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, payload)
+	frame := buildTDXReply(CMD_SECURITY_COUNT, payload)
 
 	client, close := pipeWith(frame)
 	defer close()
@@ -200,7 +241,7 @@ func TestReadRawResponseCompressed(t *testing.T) {
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
-	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_COMPRESSED, buf.Bytes())
+	frame := buildTDXReplyCompressed(CMD_SECURITY_COUNT, payload)
 
 	client, close := pipeWith(frame)
 	defer close()
@@ -218,8 +259,8 @@ func TestReadRawResponseCompressed(t *testing.T) {
 }
 
 func TestReadRawResponseFailures(t *testing.T) {
-	base := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_PLAIN, []byte{0x01, 0x00})
-	overclaim := putUint16(base, 7, 4) // declares 4 payload bytes, only 2 follow
+	base := buildTDXReply(CMD_SECURITY_COUNT, []byte{0x01, 0x00})
+	overclaim := putUint16(base, 12, 4) // zipsize at [12:14] declares 4 bytes, only 2 follow
 
 	cases := []struct {
 		name    string
@@ -229,9 +270,7 @@ func TestReadRawResponseFailures(t *testing.T) {
 	}{
 		{"truncated header", []byte{0x00, 0x44, 0x33, 0x22, 0x11}, CMD_SECURITY_COUNT, "header shorter"},
 		{"truncated payload", overclaim, CMD_SECURITY_COUNT, "payload shorter"},
-		{"command mismatch", buildTDXReply(CMD_SECURITY_LIST, RESP_CONTROL_PLAIN, []byte{0x00, 0x00}), CMD_SECURITY_COUNT, "does not match"},
-		{"length mismatch", putUint16(base, 9, 7), CMD_SECURITY_COUNT, "length fields disagree"},
-		{"unknown control", putUint16(base, 5, 0x0009), CMD_SECURITY_COUNT, "unknown control"},
+		{"command mismatch", buildTDXReply(CMD_SECURITY_LIST, []byte{0x00, 0x00}), CMD_SECURITY_COUNT, "does not match"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,8 +288,19 @@ func TestReadRawResponseFailures(t *testing.T) {
 }
 
 func TestReadRawResponseGarbagePayloadCompressed(t *testing.T) {
-	frame := buildTDXReply(CMD_SECURITY_COUNT, RESP_CONTROL_COMPRESSED, []byte{0x00, 0x00, 0x00})
-	client, close := pipeWith(frame)
+	// Build a 16-byte-header response where zipsize != unzipsize but the body
+	// is not a valid zlib stream.
+	garbage := []byte{0x00, 0x00, 0x00}
+	buf := make([]byte, int(RES_HEADER_SIZE)+len(garbage))
+	binary.LittleEndian.PutUint32(buf[0:], 0x11223344)
+	binary.LittleEndian.PutUint32(buf[4:], 0x11223344)
+	binary.LittleEndian.PutUint16(buf[8:], 0)
+	binary.LittleEndian.PutUint16(buf[10:], CMD_SECURITY_COUNT)
+	binary.LittleEndian.PutUint16(buf[12:], uint16(len(garbage))) // zipsize = 3
+	binary.LittleEndian.PutUint16(buf[14:], 100)                  // unzipsize = 100 (≠ zipsize → decompress)
+	copy(buf[RES_HEADER_SIZE:], garbage)
+
+	client, close := pipeWith(buf)
 	defer close()
 
 	_, err := readRawResponse(client, CMD_SECURITY_COUNT)
