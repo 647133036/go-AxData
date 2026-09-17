@@ -163,6 +163,115 @@ func TestTDXRequestFailsFastOnSilentServer(t *testing.T) {
 	}
 }
 
+// startFakeCountServer speaks the 7709 setup + security_count protocol and
+// replies with want as the count. The listener is closed when t ends.
+func startFakeCountServer(t *testing.T, want uint16) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				for i := 0; i < 3; i++ {
+					if err := drainSetupFrame(conn); err != nil {
+						return
+					}
+					conn.Write(buildTDXReply(0, []byte{}))
+				}
+				head := make([]byte, REQ_HEADER_SIZE)
+				if _, err := io.ReadFull(conn, head); err != nil {
+					return
+				}
+				payloadLen := int(binary.LittleEndian.Uint16(head[6:8])) - 2
+				if payloadLen > 0 {
+					payload := make([]byte, payloadLen)
+					if _, err := io.ReadFull(conn, payload); err != nil {
+						return
+					}
+				}
+				body := make([]byte, 2)
+				binary.LittleEndian.PutUint16(body, want)
+				conn.Write(buildTDXReply(CMD_SECURITY_COUNT, body))
+			}(conn)
+		}
+	}()
+	return ln.Addr().String()
+}
+
+// TestTDXRequestFallsOverToSecondHost: the first host refuses, the second
+// speaks the protocol, Request returns the second host's data.
+func TestTDXRequestFallsOverToSecondHost(t *testing.T) {
+	good := startFakeCountServer(t, 42)
+	a := NewTDXAdapter([]string{"127.0.0.1:1", good})
+	a.timeout = 1
+	a.maxDuration = 5
+
+	rows, err := a.Request(context.Background(), map[string]interface{}{
+		"interface": "security_count",
+		"market":    "sz",
+	})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows: got %d, want 1", len(rows))
+	}
+	if got := rows[0]["count"].(int); got != 42 {
+		t.Fatalf("count: got %d, want 42", got)
+	}
+}
+
+// TestTDXRequestAllHostsFail: every host is unreachable; Request returns
+// after collecting every failure, not after the first one.
+func TestTDXRequestAllHostsFail(t *testing.T) {
+	a := NewTDXAdapter([]string{"127.0.0.1:1", "127.0.0.1:2"})
+	a.timeout = 1
+	a.maxDuration = 5
+
+	_, err := a.Request(context.Background(), map[string]interface{}{
+		"interface": "security_count",
+	})
+	if err == nil {
+		t.Fatal("expected an error when every host fails")
+	}
+	if !strings.Contains(err.Error(), "all 2 TDX servers failed") {
+		t.Errorf("error %q does not name the host count", err.Error())
+	}
+}
+
+// TestTDXRequestFirstSuccessWins: two good hosts; Request returns as soon as
+// either answers, without waiting for the slower one.
+func TestTDXRequestFirstSuccessWins(t *testing.T) {
+	fast := startFakeCountServer(t, 7)
+	slow := startFakeCountServer(t, 99)
+	a := NewTDXAdapter([]string{fast, slow})
+	a.timeout = 2
+	a.maxDuration = 5
+
+	rows, err := a.Request(context.Background(), map[string]interface{}{
+		"interface": "security_count",
+		"market":    "sz",
+	})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows: got %d, want 1", len(rows))
+	}
+	got := rows[0]["count"].(int)
+	if got != 7 && got != 99 {
+		t.Fatalf("count: got %d, want 7 or 99", got)
+	}
+}
+
 // TestEncodeRequestLengthMatchesFrame pins the frame-length invariant. The two
 // length fields (len1 and len2 at offsets [6:8] and [8:10]) both equal
 // payload_len+2; a conforming server reads payload_len bytes after the

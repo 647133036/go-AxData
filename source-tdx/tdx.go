@@ -317,7 +317,12 @@ func (a *TDXAdapter) Request(ctx context.Context, params map[string]interface{})
 	deadCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 
-	// Fire off all servers in parallel; return on first success.
+	if len(a.hosts) == 0 {
+		return nil, errors.New("no TDX hosts configured")
+	}
+
+	// Fire all hosts in parallel; return on first success. Failures are
+	// collected until every host has answered or the overall deadline fires.
 	type result struct {
 		rows []map[string]interface{}
 		err  error
@@ -331,17 +336,21 @@ func (a *TDXAdapter) Request(ctx context.Context, params map[string]interface{})
 		}(addr)
 	}
 
-	// Wait for first result or context cancellation.
-	select {
-	case res := <-results:
-		if res.err == nil {
-			return res.rows, nil
+	var errs []error
+	remaining := len(a.hosts)
+	for remaining > 0 {
+		select {
+		case res := <-results:
+			remaining--
+			if res.err == nil {
+				return res.rows, nil
+			}
+			errs = append(errs, res.err)
+		case <-deadCtx.Done():
+			return nil, fmt.Errorf("all %d TDX servers failed: deadline exceeded", len(a.hosts))
 		}
-		// All other goroutines are racing; wait for at least one more to confirm all failed.
-		return nil, res.err
-	case <-deadCtx.Done():
-		return nil, fmt.Errorf("all %d TDX servers failed: deadline exceeded", len(a.hosts))
 	}
+	return nil, fmt.Errorf("all %d TDX servers failed: %w", len(a.hosts), errors.Join(errs...))
 }
 
 // requestOnHost connects to a single host and executes the command.
