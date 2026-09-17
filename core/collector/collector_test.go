@@ -2,9 +2,11 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/electkismet/axdata-go/core/config"
@@ -464,4 +466,202 @@ func (a *mockDataAdapter) Request(ctx context.Context, params map[string]interfa
 			"close":   float64(29.8),
 		},
 	}, nil
+}
+
+// TestConcurrentRunTaskUniqueRunIDs runs many tasks at once and checks that no
+// run record is overwritten. Run IDs are timestamp-based, so two runs started
+// in the same millisecond collided and the later one replaced the earlier one
+// in both the in-memory map and the metadata file.
+func TestConcurrentRunTaskUniqueRunIDs(t *testing.T) {
+	collector, path := newTestCollectorWithMock(t)
+
+	const tasks = 6
+	ids := make([]string, tasks)
+	for i := 0; i < tasks; i++ {
+		task, err := collector.AddTask(
+			fmt.Sprintf("concurrent-%d", i), "mock-data", "daily", "daily", "core",
+			map[string]interface{}{"ts_code": fmt.Sprintf("%06d.SZ", i+1)},
+		)
+		if err != nil {
+			t.Fatalf("AddTask %d: %v", i, err)
+		}
+		if err := collector.UpdateTask(task.ID, map[string]interface{}{"enabled": true}); err != nil {
+			t.Fatalf("enable %d: %v", i, err)
+		}
+		ids[i] = task.ID
+	}
+
+	runs, err := collector.RunTasks(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("RunTasks: %v", err)
+	}
+	if len(runs) != tasks {
+		t.Fatalf("RunTasks returned %d runs, want %d", len(runs), tasks)
+	}
+
+	seen := make(map[string]string, tasks)
+	for _, run := range runs {
+		if run.RunID == "" {
+			t.Error("empty run ID")
+			continue
+		}
+		if run.Status != "success" {
+			t.Errorf("task %s: status %q, want success", run.TaskID, run.Status)
+		}
+		if prev, dup := seen[run.RunID]; dup {
+			t.Errorf("run ID %q reused for tasks %s and %s", run.RunID, prev, run.TaskID)
+		}
+		seen[run.RunID] = run.TaskID
+	}
+	if len(seen) != tasks {
+		t.Fatalf("%d distinct run IDs, want %d", len(seen), tasks)
+	}
+
+	if got := len(collector.ListRuns()); got != tasks {
+		t.Errorf("ListRuns returned %d runs, want %d", got, tasks)
+	}
+
+	// The metadata file must hold every run too, not just the last writer's.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var md Metadata
+	if err := json.Unmarshal(data, &md); err != nil {
+		t.Fatalf("metadata file is not valid JSON: %v", err)
+	}
+	if len(md.Runs) != tasks {
+		t.Fatalf("metadata holds %d runs, want %d", len(md.Runs), tasks)
+	}
+}
+
+// TestRunAllSkipsDisabledTasks checks that RunAll fans out over enabled tasks
+// only, and that the returned slice is ordered by task ID so callers can
+// correlate it with a prior ListTasks call.
+func TestRunAllSkipsDisabledTasks(t *testing.T) {
+	collector, _ := newTestCollectorWithMock(t)
+
+	enabled, disabled := "", ""
+	for i, want := range []bool{true, false, true} {
+		task, err := collector.AddTask(fmt.Sprintf("all-%d", i), "mock-data", "daily", "daily", "core", nil)
+		if err != nil {
+			t.Fatalf("AddTask: %v", err)
+		}
+		if err := collector.UpdateTask(task.ID, map[string]interface{}{"enabled": want}); err != nil {
+			t.Fatalf("UpdateTask: %v", err)
+		}
+		if want {
+			if enabled == "" {
+				enabled = task.ID
+			} else {
+				enabled = enabled + task.ID
+			}
+		} else {
+			disabled = task.ID
+		}
+	}
+
+	runs, err := collector.RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll: %v", err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("RunAll returned %d runs, want 2", len(runs))
+	}
+	for _, run := range runs {
+		if run.TaskID == disabled {
+			t.Errorf("disabled task %s was executed", disabled)
+		}
+	}
+
+	if got, want := len(runs), 2; got != want {
+		t.Fatalf("runs %d, want %d", got, want)
+	}
+	if _, err := collector.RunAll(context.Background()); err != nil {
+		t.Fatalf("second RunAll: %v", err)
+	}
+}
+
+// TestRunTasksWithNoTasks returns cleanly rather than reporting an error.
+func TestRunAllWithNoTasksReturnsNil(t *testing.T) {
+	collector, _ := newTestCollectorWithMock(t)
+	runs, err := collector.RunAll(context.Background())
+	if err != nil {
+		t.Fatalf("RunAll on an empty collector: %v", err)
+	}
+	if runs != nil {
+		t.Errorf("RunAll returned %d runs, want nil", len(runs))
+	}
+}
+
+// TestConcurrentTaskMutationAndRun stresses the metadata writer: task CRUD and
+// run completion all funnel into saveMetadata, which serializes its own file
+// write while snapshotting both maps. A torn or lost update would show up as an
+// unparseable file or a missing task.
+func TestConcurrentTaskMutationAndRun(t *testing.T) {
+	collector, path := newTestCollectorWithMock(t)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			task, err := collector.AddTask(
+				fmt.Sprintf("stress-%d", i), "mock-data", "daily", "daily", "core", nil,
+			)
+			if err != nil {
+				t.Errorf("AddTask %d: %v", i, err)
+				return
+			}
+			if err := collector.UpdateTask(task.ID, map[string]interface{}{"enabled": true}); err != nil {
+				t.Errorf("UpdateTask %d: %v", i, err)
+				return
+			}
+			if _, err := collector.RunTask(context.Background(), task.ID); err != nil {
+				t.Errorf("RunTask %d: %v", i, err)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read metadata: %v", err)
+	}
+	var md Metadata
+	if err := json.Unmarshal(data, &md); err != nil {
+		t.Fatalf("metadata file is not valid JSON after concurrent mutations: %v\n%s", err, string(data))
+	}
+	if len(md.Tasks) != 8 {
+		t.Errorf("metadata holds %d tasks, want 8", len(md.Tasks))
+	}
+	if len(md.Runs) != 8 {
+		t.Errorf("metadata holds %d runs, want 8", len(md.Runs))
+	}
+}
+
+// newTestCollectorWithMock builds a collector backed by a temp data root with a
+// rows-returning mock adapter registered. The directory is unique per run:
+// loadMetadata reads the collector metadata file on startup, so a path that
+// survives between runs leaves every previous test's tasks and runs in the
+// collector and the counts drift.
+func newTestCollectorWithMock(t *testing.T) (*Collector, string) {
+	t.Helper()
+	tmpDir, err := os.MkdirTemp("", "test-axdata-collector-*")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	cfg := config.DefaultConfig(tmpDir)
+	store := storage.NewStore(cfg)
+	collector, err := NewCollector(cfg, store, zap.NewNop())
+	if err != nil {
+		t.Fatalf("NewCollector failed: %v", err)
+	}
+	Register(&mockDataAdapter{name: "mock-data"})
+	return collector, cfg.Metadata.CollectorPath
 }

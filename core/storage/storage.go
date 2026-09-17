@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/electkismet/axdata-go/core/config"
@@ -20,11 +21,37 @@ import (
 // Store provides Parquet-based data storage.
 type Store struct {
 	config *config.Config
+
+	// locks serializes writes to a given layer/table. Both append and snapshot
+	// overwrite rewrite the whole file, so two concurrent writers would each
+	// read the pre-merge rows and the later rename would discard the earlier
+	// writer's data. The locks map holds a stable mutex per table key.
+	locks   map[string]*sync.Mutex
+	locksMu sync.Mutex
 }
 
 // NewStore creates a new Store instance.
 func NewStore(cfg *config.Config) *Store {
-	return &Store{config: cfg}
+	return &Store{config: cfg, locks: make(map[string]*sync.Mutex)}
+}
+
+// lockTable returns the mutex that serializes writes to one layer/table pair.
+// Keys are never released: the number of tables is bounded by the schema
+// registry, so the map cannot grow without limit.
+//
+// Locks are per-Store, so two separate Store instances sharing a data root
+// still race. Serializing a single data root across processes needs an
+// external lock.
+func (s *Store) lockTable(layer, table string) *sync.Mutex {
+	s.locksMu.Lock()
+	defer s.locksMu.Unlock()
+	key := layer + "/" + table
+	m, ok := s.locks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		s.locks[key] = m
+	}
+	return m
 }
 
 // Record represents a generic record as a map of column values.
@@ -58,8 +85,16 @@ func (s *Store) Write(layer, table string, records []interface{}) error {
 	// For append-mode tables, use Append (preserves existing data).
 	// For overwrite/snapshot tables, use Write (creates new file).
 	if schemaDef.WriteMode == "append" || schemaDef.WriteMode == "upsert_by_key" {
+		// Append takes the table lock; taking it here too would deadlock, since
+		// sync.Mutex is not reentrant.
 		return s.Append(layer, table, typedRecords)
 	}
+
+	// Snapshot overwrites still rewrite the whole file, so two concurrent
+	// writers to the same table would race on the rename.
+	mu := s.lockTable(layer, table)
+	mu.Lock()
+	defer mu.Unlock()
 
 	// Overwrite mode: write as new file
 	path := filepath.Join(dir, table+".parquet")
@@ -504,6 +539,14 @@ func (s *Store) Append(layer string, table string, records []interface{}) error 
 	if schemaDef == nil {
 		return fmt.Errorf("unknown table: %s", table)
 	}
+
+	// The read-merge-write below is not atomic by itself: two concurrent
+	// appends would both read the same pre-merge rows, and whichever rename
+	// lands second wins, discarding the other's rows. Hold the table lock for
+	// the whole region. Validation stays outside the critical section.
+	mu := s.lockTable(layer, table)
+	mu.Lock()
+	defer mu.Unlock()
 
 	path := filepath.Join(dir, table+".parquet")
 

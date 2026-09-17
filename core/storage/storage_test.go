@@ -2,10 +2,12 @@ package storage
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	parquet "github.com/parquet-go/parquet-go"
@@ -294,7 +296,6 @@ func readDailyRows(path string) ([]schema.DailyRecord, int, error) {
 	}
 }
 
-// survive a read back with every column intact. Without a typed conversion case
 // TestSnapshotRoundTrip ensures snapshot tables written from generic map records
 // survive a read back with every column intact. Without a typed conversion case
 // per table, parquet-go collapses a Go map into a single blob column and all
@@ -381,4 +382,75 @@ func colNames(ps *parquet.Schema) []string {
 		names = append(names, strings.Join(col, "."))
 	}
 	return names
+}
+
+// TestConcurrentAppendToSameTable loses rows when it fails. Append is a
+// read-merge-atomic-rename with no locking, so concurrent appends each read the
+// same pre-merge rows; whichever rename lands last wins and the other writers'
+// rows vanish. Concurrent collection is the normal case here, since many tasks
+// write to one table (daily) for different symbols.
+func TestConcurrentAppendToSameTable(t *testing.T) {
+	tmpDir := "/tmp/test-axdata-store-concurrent-" + t.Name()
+	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+
+	store := NewStore(config.DefaultConfig(tmpDir))
+
+	const writers = 8
+	const perWriter = 12
+	var all []schema.DailyRecord
+	for w := 0; w < writers; w++ {
+		for i := 0; i < perWriter; i++ {
+			all = append(all, schema.DailyRecord{
+				TsCode:    fmt.Sprintf("%06d.SZ", w*100+i),
+				TradeDate: fmt.Sprintf("2024-02-%02d", i+1),
+				Close:     float64(w*100 + i),
+			})
+		}
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			<-start
+			batch := make([]interface{}, perWriter)
+			for i := 0; i < perWriter; i++ {
+				batch[i] = all[w*perWriter+i]
+			}
+			if err := store.Append("core", "daily", batch); err != nil {
+				t.Errorf("writer %d: %v", w, err)
+			}
+		}(w)
+	}
+	close(start)
+	wg.Wait()
+
+	path := filepath.Join(tmpDir, "data/core/daily.parquet")
+	got, numRows, err := readDailyRows(path)
+	if err != nil {
+		t.Fatalf("parquet unreadable after concurrent appends: %v", err)
+	}
+	wantRows := writers * perWriter
+	if numRows != wantRows {
+		t.Fatalf("NumRows = %d, want %d (concurrent appends lost rows)", numRows, wantRows)
+	}
+	if len(got) != wantRows {
+		t.Fatalf("read back %d rows, want %d", len(got), wantRows)
+	}
+
+	seen := make(map[string]bool, len(got))
+	for _, r := range got {
+		seen[fmt.Sprintf("%s %s", r.TsCode, r.TradeDate)] = true
+	}
+	missing := 0
+	for _, r := range all {
+		if !seen[fmt.Sprintf("%s %s", r.TsCode, r.TradeDate)] {
+			missing++
+		}
+	}
+	if missing > 0 {
+		t.Errorf("%d of %d rows missing after concurrent append", missing, wantRows)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -52,10 +53,32 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 			interfaceName, _ := cmd.Flags().GetString("interface")
 			table, _ := cmd.Flags().GetString("table")
 			paramsStr, _ := cmd.Flags().GetString("params")
+			taskFile, _ := cmd.Flags().GetString("task-file")
 			var params map[string]interface{}
 			if paramsStr != "" {
 				if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
 					return fmt.Errorf("invalid params JSON: %w", err)
+				}
+			}
+			// --task-file carries params a one-line --params cannot express
+			// cleanly, such as a date range for daily bars. Keys present in
+			// --params win, so the file only fills in what the flags omit.
+			if taskFile != "" {
+				data, err := os.ReadFile(taskFile)
+				if err != nil {
+					return fmt.Errorf("read task file: %w", err)
+				}
+				fileParams := map[string]interface{}{}
+				if err := json.Unmarshal(data, &fileParams); err != nil {
+					return fmt.Errorf("invalid task file JSON: %w", err)
+				}
+				if params == nil {
+					params = make(map[string]interface{})
+				}
+				for k, v := range fileParams {
+					if _, exists := params[k]; !exists {
+						params[k] = v
+					}
 				}
 			}
 			return r.runTaskAdd(args[0], sourceName, interfaceName, table, params)
@@ -65,6 +88,7 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 	addCmd.Flags().String("interface", "", "Interface name")
 	addCmd.Flags().String("table", "", "Target table")
 	addCmd.Flags().String("params", "", "Parameters as JSON string (e.g. '{\"symbols\":\"600519.SH\"}')")
+	addCmd.Flags().String("task-file", "", "Parameters from a JSON file")
 	taskCmd.AddCommand(addCmd)
 
 	// task info
@@ -107,6 +131,19 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 			return r.runTaskRun(ctx, args[0])
 		},
 	})
+
+	// task run-all
+	runAllCmd := &cobra.Command{
+		Use:   "run-all",
+		Short: "Run all enabled tasks concurrently",
+		Long:  "Run every enabled task at once, bounded by collector.max_concurrent_tasks.",
+	}
+	runAllIsJSON := false
+	runAllCmd.Flags().BoolVar(&runAllIsJSON, "format-json", false, "output JSON instead of a table")
+	runAllCmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return r.runTaskRunAll(cmd.Context(), runAllIsJSON)
+	}
+	taskCmd.AddCommand(runAllCmd)
 
 	cmd.AddCommand(taskCmd)
 
@@ -250,6 +287,48 @@ func (r *RootCmd) runTaskRun(ctx context.Context, taskID string) error {
 	fmt.Printf("Run ID:    %s\n", run.RunID)
 	fmt.Printf("Status:    %s\n", run.Status)
 	fmt.Printf("Rows:      %d\n", run.Rows)
+	return nil
+}
+
+func (r *RootCmd) runTaskRunAll(ctx context.Context, isJSON bool) error {
+	fmt.Fprintln(os.Stderr, "Running all enabled tasks concurrently")
+	runs, err := r.collector.RunAll(ctx)
+	if err != nil {
+		return fmt.Errorf("run error: %w", err)
+	}
+
+	results := make([]map[string]interface{}, 0, len(runs))
+	totalRows := 0
+	failed := 0
+	for _, run := range runs {
+		if run.Status == "failed" {
+			failed++
+		}
+		totalRows += run.Rows
+		results = append(results, map[string]interface{}{
+			"task_id": run.TaskID,
+			"run_id":  run.RunID,
+			"status":  run.Status,
+			"rows":    run.Rows,
+			"error":   run.Error,
+		})
+	}
+
+	if isJSON {
+		return printJSON(os.Stdout, map[string]interface{}{
+			"tasks":  len(runs),
+			"failed": failed,
+			"rows":   totalRows,
+			"runs":   results,
+		})
+	}
+
+	fmt.Printf("%-22s %-18s %-10s %-8s\n", "RUN_ID", "TASK_ID", "STATUS", "ROWS")
+	fmt.Println(strings.Repeat("-", 62))
+	for _, run := range runs {
+		fmt.Printf("%-22s %-18s %-10s %-8d\n", run.RunID, run.TaskID, run.Status, run.Rows)
+	}
+	fmt.Printf("\n%d tasks, %d rows collected, %d failed\n", len(runs), totalRows, failed)
 	return nil
 }
 
