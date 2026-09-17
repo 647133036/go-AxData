@@ -73,6 +73,12 @@ type Collector struct {
 	// could clobber a later mutation.
 	saveMu    sync.Mutex
 	semaphore *semaphore.Weighted
+	// throttle enforces RequestIntervalMs between successive adapter.Request
+	// calls to the same source. With RunTasks fanning out across the semaphore,
+	// concurrent runs hitting one rate-limited source serialize at this rate,
+	// which is exactly the protection request_interval_ms is for.
+	throttleMu sync.Mutex
+	throttle   map[string]time.Time
 }
 
 // newIDSeq allocates monotonically increasing ID suffixes. Run and task IDs are
@@ -96,6 +102,7 @@ func NewCollector(cfg *config.Config, store *storage.Store, logger *zap.Logger) 
 		tasks:     make(map[string]*Task),
 		runs:      make(map[string]*Run),
 		semaphore: semaphore.NewWeighted(int64(cfg.Collector.MaxConcurrentTasks)),
+		throttle:  make(map[string]time.Time),
 	}
 
 	if err := c.loadMetadata(); err != nil {
@@ -515,6 +522,11 @@ func (c *Collector) executeTask(ctx context.Context, task *Task) (int, error) {
 		params[k] = v
 	}
 
+	// Rate-limit per source: request_interval_ms paces successive requests to
+	// the same source so concurrent runs of one source do not burst past the
+	// source's own throttle. A zero or negative interval disables the wait.
+	c.paceRequest(ctx, task.Source)
+
 	// Execute request
 	data, err := adapter.Request(ctx, params)
 	if err != nil {
@@ -523,6 +535,13 @@ func (c *Collector) executeTask(ctx context.Context, task *Task) (int, error) {
 
 	if data == nil || len(data) == 0 {
 		return 0, nil
+	}
+
+	// Cap rows per run: batch_size bounds how many rows one run can land, so a
+	// source returning a huge payload cannot blow up storage or a single run.
+	// A zero or negative batch_size disables the cap.
+	if bs := c.config.Collector.BatchSize; bs > 0 && len(data) > bs {
+		data = data[:bs]
 	}
 
 	// Resolve output table: use task.Table if set, otherwise look up provider registry.
@@ -564,6 +583,42 @@ func (c *Collector) executeTask(ctx context.Context, task *Task) (int, error) {
 	}
 
 	return len(records), nil
+}
+
+// paceRequest blocks until at least RequestIntervalMs has elapsed since the
+// last request to the same source, then records the scheduled start so the
+// next caller chains off it. throttle[source] holds the scheduled start time
+// of the most recent request, so concurrent runs of one source space out at
+// the configured rate rather than all sleeping the same delta.
+//
+// It honours context cancellation so a shutting-down collector does not stall
+// on a long interval. A zero or negative interval is a no-op.
+func (c *Collector) paceRequest(ctx context.Context, source string) {
+	interval := time.Duration(c.config.Collector.RequestIntervalMs) * time.Millisecond
+	if interval <= 0 {
+		return
+	}
+	c.throttleMu.Lock()
+	last := c.throttle[source]
+	now := time.Now()
+	var wait time.Duration
+	if last.IsZero() || now.Sub(last) >= interval {
+		c.throttle[source] = now
+	} else {
+		wait = interval - now.Sub(last)
+		c.throttle[source] = now.Add(wait)
+	}
+	c.throttleMu.Unlock()
+
+	if wait <= 0 {
+		return
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 // buildRecord converts raw data to a typed record for the given table.
