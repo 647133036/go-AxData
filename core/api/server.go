@@ -379,6 +379,7 @@ func (s *APIServer) collectorAddTaskHandler(w http.ResponseWriter, r *http.Reque
 		Table     string                 `json:"table"`
 		Layer     string                 `json:"layer"`
 		Params    map[string]interface{} `json:"params"`
+		Schedule  collector.TaskSchedule `json:"schedule"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -386,7 +387,7 @@ func (s *APIServer) collectorAddTaskHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	task, err := s.collector.AddTask(req.Name, req.Source, req.Interface, req.Table, req.Layer, req.Params)
+	task, err := s.collector.AddTask(req.Name, req.Source, req.Interface, req.Table, req.Layer, req.Params, req.Schedule)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

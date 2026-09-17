@@ -51,6 +51,7 @@ func TestIntegration_AdapterToStorage(t *testing.T) {
 		map[string]interface{}{
 			"codes": "000001.SZ,000002.SZ",
 		},
+		collector.TaskSchedule{},
 	)
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
@@ -120,6 +121,7 @@ func TestIntegration_MockAdapterFullPipeline(t *testing.T) {
 		map[string]interface{}{
 			"codes": "000001.SZ,000002.SZ",
 		},
+		collector.TaskSchedule{},
 	)
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)

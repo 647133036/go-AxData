@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -452,5 +453,38 @@ func TestConcurrentAppendToSameTable(t *testing.T) {
 	}
 	if missing > 0 {
 		t.Errorf("%d of %d rows missing after concurrent append", missing, wantRows)
+	}
+}
+
+// TestTypedRecordCoversSchemaColumns catches schema/struct drift. TableRegistry
+// is the contract a source adapter and a SQL query both rely on, while
+// convertRecords decides what actually reaches the file. When the two diverge a
+// column is silently dropped at the storage boundary and no single package's
+// tests see it: the schema test sees the declared column, the adapter test sees
+// the emitted field, and only a round trip reveals the loss.
+func TestTypedRecordCoversSchemaColumns(t *testing.T) {
+	for table, schemaDef := range schema.TableRegistry {
+		if newTypedRecord(table) == nil {
+			continue
+		}
+
+		typed := reflect.TypeOf(newTypedRecord(table)).Elem()
+		declared := make(map[string]bool, typed.NumField())
+		for i := 0; i < typed.NumField(); i++ {
+			field := typed.Field(i)
+			tag, _ := field.Tag.Lookup("parquet")
+			if tag == "" {
+				t.Errorf("%s: field %s has no parquet tag, so it is never read back", table, field.Name)
+				continue
+			}
+			declared[tag] = true
+		}
+
+		for _, col := range schemaDef.Columns {
+			if !declared[col.Name] {
+				t.Errorf("%s declares column %q but %s has no matching parquet field: the value is dropped at the storage boundary",
+					table, col.Name, typed.Name())
+			}
+		}
 	}
 }

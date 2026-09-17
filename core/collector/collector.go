@@ -32,14 +32,19 @@ type Task struct {
 	Enabled   bool                   `json:"enabled"`
 	Schedule  TaskSchedule           `json:"schedule"`
 	Params    map[string]interface{} `json:"params"`
-	CreatedAt time.Time              `json:"created_at"`
-	UpdatedAt time.Time              `json:"updated_at"`
+	// LastRun is set by the scheduler after a successful run and is what makes
+	// an interval or daily schedule fire only once per period. Manual runs do
+	// not update it, so they never suppress a scheduled run.
+	LastRun   time.Time `json:"last_run"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TaskSchedule defines when a task runs.
 type TaskSchedule struct {
-	Type     string `json:"type"` // manual, interval, daily, startup
-	Interval string `json:"interval,omitempty"`
+	Type     string `json:"type"`               // manual, interval, daily, startup
+	Interval string `json:"interval,omitempty"` // duration for interval, e.g. "5m"
+	Time     string `json:"time,omitempty"`     // wall clock for daily, "HH:MM"
 }
 
 // Run represents a single task execution.
@@ -180,17 +185,31 @@ func (c *Collector) saveMetadata() error {
 
 // snapshotTasks deep-copies the task map. Copying Params breaks the shared
 // reference so a later UpdateTask cannot be observed mid-marshal.
+// copyTask clones a task so a caller holding the copy cannot observe a
+// concurrent writer and cannot be mutated through the live record.
+func copyTask(t *Task) *Task {
+	cp := *t
+	if t.Params != nil {
+		cp.Params = make(map[string]interface{}, len(t.Params))
+		for pk, pv := range t.Params {
+			cp.Params[pk] = pv
+		}
+	}
+	return &cp
+}
+
+// copyRun clones a run. RunTask writes Status, Rows and EndedAt after the run
+// record is published to the map, so handing callers the live pointer is a
+// data race even when the map itself is guarded.
+func copyRun(r *Run) *Run {
+	cp := *r
+	return &cp
+}
+
 func (c *Collector) snapshotTasks() map[string]*Task {
 	out := make(map[string]*Task, len(c.tasks))
 	for k, t := range c.tasks {
-		cp := *t
-		if t.Params != nil {
-			cp.Params = make(map[string]interface{}, len(t.Params))
-			for pk, pv := range t.Params {
-				cp.Params[pk] = pv
-			}
-		}
-		out[k] = &cp
+		out[k] = copyTask(t)
 	}
 	return out
 }
@@ -200,8 +219,7 @@ func (c *Collector) snapshotTasks() map[string]*Task {
 func (c *Collector) snapshotRuns() map[string]*Run {
 	out := make(map[string]*Run, len(c.runs))
 	for k, r := range c.runs {
-		cp := *r
-		out[k] = &cp
+		out[k] = copyRun(r)
 	}
 	return out
 }
@@ -245,8 +263,9 @@ func addTaskID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixMilli(), atomic.AddUint64(&newIDSeq, 1))
 }
 
-// AddTask creates a new task.
-func (c *Collector) AddTask(name, source, interfaceName, table, layer string, params map[string]interface{}) (*Task, error) {
+// AddTask creates a new task. New tasks start disabled so a task can be
+// reviewed and enabled deliberately rather than firing on its first save.
+func (c *Collector) AddTask(name, source, interfaceName, table, layer string, params map[string]interface{}, schedule TaskSchedule) (*Task, error) {
 	t := &Task{
 		ID:        addTaskID(),
 		Name:      name,
@@ -255,6 +274,7 @@ func (c *Collector) AddTask(name, source, interfaceName, table, layer string, pa
 		Table:     table,
 		Layer:     layer,
 		Enabled:   false,
+		Schedule:  schedule,
 		Params:    params,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
@@ -283,7 +303,7 @@ func (c *Collector) ListTasks() []*Task {
 
 	var tasks []*Task
 	for _, t := range c.tasks {
-		tasks = append(tasks, t)
+		tasks = append(tasks, copyTask(t))
 	}
 	return tasks
 }
@@ -293,7 +313,10 @@ func (c *Collector) GetTask(id string) (*Task, bool) {
 	c.tasksMu.RLock()
 	defer c.tasksMu.RUnlock()
 	t, ok := c.tasks[id]
-	return t, ok
+	if !ok {
+		return nil, false
+	}
+	return copyTask(t), true
 }
 
 // DeleteTask removes a task.
@@ -325,6 +348,11 @@ func (c *Collector) UpdateTask(id string, updates map[string]interface{}) error 
 			case "params":
 				if params, ok := v.(map[string]interface{}); ok {
 					t.Params = params
+				}
+			case "schedule":
+				schedule := scheduleFromMap(v)
+				if schedule != nil {
+					t.Schedule = *schedule
 				}
 			}
 		}
@@ -678,7 +706,7 @@ func (c *Collector) ListRuns() []*Run {
 
 	var runs []*Run
 	for _, r := range c.runs {
-		runs = append(runs, r)
+		runs = append(runs, copyRun(r))
 	}
 	return runs
 }
@@ -688,5 +716,8 @@ func (c *Collector) GetRun(id string) (*Run, bool) {
 	c.runsMu.RLock()
 	defer c.runsMu.RUnlock()
 	r, ok := c.runs[id]
-	return r, ok
+	if !ok {
+		return nil, false
+	}
+	return copyRun(r), true
 }

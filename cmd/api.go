@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/electkismet/axdata-go/core/api"
+	"github.com/electkismet/axdata-go/core/collector"
 	"github.com/spf13/cobra"
 )
 
 // NewAPIServeCmdForServer creates an API serve command with a pre-built server.
-func NewAPIServeCmdForServer(server *api.APIServer) *cobra.Command {
+func NewAPIServeCmdForServer(server *api.APIServer, scheduler *collector.Scheduler) *cobra.Command {
 	var port int
 
 	cmd := &cobra.Command{
@@ -23,7 +24,7 @@ func NewAPIServeCmdForServer(server *api.APIServer) *cobra.Command {
 		Long:  "Start the AxData HTTP API server for data querying and management.",
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := cmd.Context()
-			runAPIServeForServer(ctx, server, port)
+			runAPIServeForServer(ctx, server, port, scheduler)
 		},
 	}
 
@@ -32,8 +33,16 @@ func NewAPIServeCmdForServer(server *api.APIServer) *cobra.Command {
 	return cmd
 }
 
-func runAPIServeForServer(ctx context.Context, server *api.APIServer, port int) {
+// runAPIServeForServer runs the API server and, when scheduler is non-nil, the
+// task scheduler for the life of the process. A non-nil scheduler means
+// config.scheduler.enabled was set, so api owns both serving and collection.
+func runAPIServeForServer(ctx context.Context, server *api.APIServer, port int, scheduler *collector.Scheduler) {
 	fmt.Fprintf(os.Stderr, "Starting AxData API server on :%d\n", port)
+
+	if scheduler != nil {
+		scheduler.Start()
+		defer scheduler.Stop()
+	}
 
 	// Build routes
 	mux := http.NewServeMux()

@@ -107,8 +107,13 @@ func (a *adapter) requestSpot(ctx context.Context, params map[string]interface{}
 	}
 
 	payload := data.(map[string]interface{})
-	if code := payload["code"]; code != nil && code != 0 && code != "0" {
-		return nil, fmt.Errorf("board rank error: %v", code)
+	// JSON numbers unmarshal to float64, so compare against 0.0; comparing
+	// against the untyped int literal 0 always fails for a numeric code and
+	// would report every successful response as an error.
+	if code, ok := payload["code"]; ok && code != nil {
+		if f, ok := code.(float64); !ok || f != 0 {
+			return nil, fmt.Errorf("board rank error: %v", code)
+		}
 	}
 
 	source := payload["data"]

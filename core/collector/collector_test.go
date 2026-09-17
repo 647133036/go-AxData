@@ -191,7 +191,7 @@ func TestCollectorTaskCreation(t *testing.T) {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
 
-	task, err := collector.AddTask("test-task", "tdx", "daily", "daily", "core", map[string]interface{}{"code": "000001.SZ"})
+	task, err := collector.AddTask("test-task", "tdx", "daily", "daily", "core", map[string]interface{}{"code": "000001.SZ"}, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestExecuteTask_UnknownSource(t *testing.T) {
 		t.Fatalf("NewCollector failed: %v", err)
 	}
 
-	task, err := collector.AddTask("test-unknown-source", "nonexistent_source_xyz", "daily", "daily", "core", nil)
+	task, err := collector.AddTask("test-unknown-source", "nonexistent_source_xyz", "daily", "daily", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestExecuteTask_AdapterError(t *testing.T) {
 	}
 	Register(adapter)
 
-	task, err := collector.AddTask("test-adapter-error", "error-source", "daily", "daily", "core", nil)
+	task, err := collector.AddTask("test-adapter-error", "error-source", "daily", "daily", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestExecuteTask_EmptyResults(t *testing.T) {
 	adapter := &emptyAdapter{name: "empty-source"}
 	Register(adapter)
 
-	task, err := collector.AddTask("test-empty", "empty-source", "daily", "daily", "core", nil)
+	task, err := collector.AddTask("test-empty", "empty-source", "daily", "daily", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestExecuteTask_NoOutputTable(t *testing.T) {
 	Register(adapter)
 
 	// Use a non-existent interface name so GetOutputTable returns empty
-	task, err := collector.AddTask("test-no-table", "mock-data", "nonexistent_interface", "", "core", nil)
+	task, err := collector.AddTask("test-no-table", "mock-data", "nonexistent_interface", "", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestExecuteTask_UnknownSchema(t *testing.T) {
 	Register(adapter)
 
 	// Task table points to a schema that doesn't exist
-	task, err := collector.AddTask("test-unknown-schema", "mock-data", "daily", "nonexistent_table_xyz", "core", nil)
+	task, err := collector.AddTask("test-unknown-schema", "mock-data", "daily", "nonexistent_table_xyz", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -398,7 +398,7 @@ func TestExecuteTask_TaskParamOverrides(t *testing.T) {
 		delete(source.ProviderRegistry, customIface)
 	}()
 
-	task, err := collector.AddTask("test-override", "mock-data", customIface, "", "core", nil)
+	task, err := collector.AddTask("test-override", "mock-data", customIface, "", "core", nil, TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
 	}
@@ -481,6 +481,7 @@ func TestConcurrentRunTaskUniqueRunIDs(t *testing.T) {
 		task, err := collector.AddTask(
 			fmt.Sprintf("concurrent-%d", i), "mock-data", "daily", "daily", "core",
 			map[string]interface{}{"ts_code": fmt.Sprintf("%06d.SZ", i+1)},
+			TaskSchedule{},
 		)
 		if err != nil {
 			t.Fatalf("AddTask %d: %v", i, err)
@@ -543,7 +544,7 @@ func TestRunAllSkipsDisabledTasks(t *testing.T) {
 
 	enabled, disabled := "", ""
 	for i, want := range []bool{true, false, true} {
-		task, err := collector.AddTask(fmt.Sprintf("all-%d", i), "mock-data", "daily", "daily", "core", nil)
+		task, err := collector.AddTask(fmt.Sprintf("all-%d", i), "mock-data", "daily", "daily", "core", nil, TaskSchedule{})
 		if err != nil {
 			t.Fatalf("AddTask: %v", err)
 		}
@@ -609,7 +610,7 @@ func TestConcurrentTaskMutationAndRun(t *testing.T) {
 			defer wg.Done()
 			<-start
 			task, err := collector.AddTask(
-				fmt.Sprintf("stress-%d", i), "mock-data", "daily", "daily", "core", nil,
+				fmt.Sprintf("stress-%d", i), "mock-data", "daily", "daily", "core", nil, TaskSchedule{},
 			)
 			if err != nil {
 				t.Errorf("AddTask %d: %v", i, err)

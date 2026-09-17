@@ -127,7 +127,7 @@ func TestRootCommandTaskRunFailureExitsNonZero(t *testing.T) {
 	root.SetErr(io.Discard)
 
 	// No adapter is registered, so the run must fail inside the collector.
-	task, err := collectorInst.AddTask("broken", "no.such.source", "x", "daily", "core", nil)
+	task, err := collectorInst.AddTask("broken", "no.such.source", "x", "daily", "core", nil, collector.TaskSchedule{})
 	if err != nil {
 		t.Fatalf("AddTask: %v", err)
 	}

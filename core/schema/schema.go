@@ -26,10 +26,12 @@ type AdjFactorRecord struct {
 
 // TradeCalRecord represents a trading calendar entry.
 type TradeCalRecord struct {
-	Exchange     string `parquet:"exchange"`
-	CalDate      string `parquet:"cal_date"`
-	IsOpen       int64  `parquet:"is_open"`
-	PretradeDate string `parquet:"pretrade_date"`
+	Exchange        string  `parquet:"exchange"`
+	CalDate         string  `parquet:"cal_date"`
+	IsOpen          int64   `parquet:"is_open"`
+	PretradeDate    string  `parquet:"pretrade_date"`
+	MarketSentiment string  `parquet:"market_sentiment"`
+	MarketAmount    float64 `parquet:"market_amount"`
 }
 
 // StockBasicRecord represents stock basic information.
@@ -46,6 +48,21 @@ type StockBasicRecord struct {
 	ListDate      string  `parquet:"list_date"`
 	DelistDate    string  `parquet:"delist_date"`
 	ListingStatus string  `parquet:"listing_status"`
+	LastPrice     float64 `parquet:"last_price"`
+	PreClose      float64 `parquet:"pre_close"`
+	Open          float64 `parquet:"open"`
+	High          float64 `parquet:"high"`
+	Low           float64 `parquet:"low"`
+	Change        float64 `parquet:"change"`
+	ChangePct     float64 `parquet:"change_pct"`
+	Amount        float64 `parquet:"amount"`
+	Volume        float64 `parquet:"volume"`
+	TurnoverRate  float64 `parquet:"turnover_rate"`
+	VolumeRatio   float64 `parquet:"volume_ratio"`
+	TotalMarket   float64 `parquet:"total_market"`
+	CircMarket    float64 `parquet:"circ_market"`
+	PeTTM         float64 `parquet:"pe_ttm"`
+	Pb            float64 `parquet:"pb"`
 }
 
 // IncomeRecord represents one period of an income statement.

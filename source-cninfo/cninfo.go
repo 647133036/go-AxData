@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -71,29 +70,14 @@ type webapiField struct {
 	kind   string
 }
 
-// fieldSourceKey matches a _WebapiField's source field to the actual API response.
-// Returns the value from the row, handling both numeric-index and named-key sources.
+// fieldSourceKey matches a webapiField's source to the record's response key.
+// A source absent from the record yields nil. The previous implementation fell
+// back to collecting every value in the record, sorting them as strings, and
+// indexing into that sort — a positional source then returned an unrelated
+// field's value and the row looked populated while carrying wrong data. An
+// empty field is observable; a wrong one is a silent lie.
 func fieldSourceKey(row map[string]interface{}, source string) interface{} {
-	v, ok := row[source]
-	if ok {
-		return v
-	}
-	i, err := strconv.Atoi(source)
-	if err == nil {
-		values := make([]interface{}, 0, len(row))
-		for _, val := range row {
-			values = append(values, val)
-		}
-		sort.Slice(values, func(a, b int) bool {
-			sa := fmt.Sprintf("%v", values[a])
-			sb := fmt.Sprintf("%v", values[b])
-			return sa < sb
-		})
-		if i >= 0 && i < len(values) {
-			return values[i]
-		}
-	}
-	return nil
+	return row[source]
 }
 
 // webapiRecords extracts the "records" array from a webapi response.
@@ -133,7 +117,9 @@ func normalizeWebapiRow(row map[string]interface{}, fields []webapiField) map[st
 // normalizeWebapiValue parses a raw value according to its kind.
 func normalizeWebapiValue(raw interface{}, kind string) interface{} {
 	if raw == nil {
-		return nil
+		// Empty, not nil: the row is a map[string]string downstream, and a nil
+		// slot surfaces as the literal text "nil" once written to parquet.
+		return ""
 	}
 	s := cleanText(raw)
 	if s == "" {
@@ -1509,33 +1495,37 @@ var cninfoIndustryPEClassMap = map[string]string{
 // FIELD DEFINITIONS
 
 // WEBAPI_STOCK_PROFILE_FIELDS
+// WEBAPI_STOCK_PROFILE_FIELDS maps p_sysapi1133 to its real response keys. The
+// endpoint answers with CNINFO's own field codes (ORGNAME, F001V, ...), not
+// positional indices; each record only carries the codes it populates.
 var WEBAPI_STOCK_PROFILE_FIELDS = []webapiField{
-	{"company_name", "0", ""},
-	{"english_name", "1", ""},
-	{"former_short_name", "2", ""},
-	{"a_share_code", "3", ""},
-	{"a_share_name", "4", ""},
-	{"b_share_code", "5", ""},
-	{"b_share_name", "6", ""},
-	{"h_share_code", "7", ""},
-	{"h_share_name", "8", ""},
-	{"selected_indexes", "9", ""},
-	{"market", "10", ""},
-	{"industry", "11", ""},
-	{"legal_representative", "12", ""},
-	{"registered_capital", "13", "float"},
-	{"founded_date", "14", "date"},
-	{"listing_date", "15", "date"},
-	{"website", "16", ""},
-	{"email", "17", ""},
-	{"phone", "18", ""},
-	{"fax", "19", ""},
-	{"registered_address", "20", ""},
-	{"office_address", "21", ""},
-	{"postcode", "22", ""},
-	{"main_business", "23", ""},
-	{"business_scope", "24", ""},
-	{"organization_profile", "25", ""},
+	{"company_name", "ORGNAME", ""},
+	{"english_name", "F001V", ""},
+	{"former_short_name", "F002V", ""},
+	{"chairman", "F003V", ""},
+	{"a_share_code", "ASECCODE", ""},
+	{"a_share_name", "ASECNAME", ""},
+	{"b_share_code", "BSECCODE", ""},
+	{"b_share_name", "BSECNAME", ""},
+	{"h_share_code", "HSECCODE", ""},
+	{"h_share_name", "HSECNAME", ""},
+	{"selected_indexes", "F044V", ""},
+	{"market", "MARKET", ""},
+	{"industry", "F032V", ""},
+	{"legal_representative", "F018V", ""},
+	{"registered_capital", "F007N", "float"},
+	{"founded_date", "F010D", "date"},
+	{"listing_date", "F006D", "date"},
+	{"postcode", "F006V", ""},
+	{"website", "F011V", ""},
+	{"email", "F012V", ""},
+	{"phone", "F013V", ""},
+	{"fax", "F014V", ""},
+	{"registered_address", "F004V", ""},
+	{"office_address", "F005V", ""},
+	{"main_business", "F015V", ""},
+	{"business_scope", "F016V", ""},
+	{"organization_profile", "F017V", ""},
 }
 
 // WEBAPI_STOCK_ALLOTMENT_FIELDS

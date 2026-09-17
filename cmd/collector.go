@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/electkismet/axdata-go/core/collector"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +56,9 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 			table, _ := cmd.Flags().GetString("table")
 			paramsStr, _ := cmd.Flags().GetString("params")
 			taskFile, _ := cmd.Flags().GetString("task-file")
+			scheduleType, _ := cmd.Flags().GetString("schedule")
+			interval, _ := cmd.Flags().GetString("schedule-interval")
+			dailyTime, _ := cmd.Flags().GetString("schedule-time")
 			var params map[string]interface{}
 			if paramsStr != "" {
 				if err := json.Unmarshal([]byte(paramsStr), &params); err != nil {
@@ -81,7 +86,11 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 					}
 				}
 			}
-			return r.runTaskAdd(args[0], sourceName, interfaceName, table, params)
+			schedule := collector.TaskSchedule{Type: scheduleType, Interval: interval, Time: dailyTime}
+			if err := validateSchedule(schedule); err != nil {
+				return err
+			}
+			return r.runTaskAdd(args[0], sourceName, interfaceName, table, params, schedule)
 		},
 	}
 	addCmd.Flags().String("source", "", "Source name")
@@ -89,6 +98,9 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 	addCmd.Flags().String("table", "", "Target table")
 	addCmd.Flags().String("params", "", "Parameters as JSON string (e.g. '{\"symbols\":\"600519.SH\"}')")
 	addCmd.Flags().String("task-file", "", "Parameters from a JSON file")
+	addCmd.Flags().String("schedule", "manual", "Schedule type: manual, interval, daily, startup")
+	addCmd.Flags().String("schedule-interval", "", "Interval for --schedule interval, e.g. 5m")
+	addCmd.Flags().String("schedule-time", "", "Wall clock for --schedule daily, HH:MM")
 	taskCmd.AddCommand(addCmd)
 
 	// task info
@@ -146,6 +158,37 @@ func newCollectorCmd(r *RootCmd) *cobra.Command {
 	taskCmd.AddCommand(runAllCmd)
 
 	cmd.AddCommand(taskCmd)
+
+	// collector scheduler
+	schedulerCmd := &cobra.Command{
+		Use:   "scheduler",
+		Short: "Task scheduler",
+		Long:  "Run scheduled collection tasks on their configured cadence.",
+	}
+
+	pollInterval := time.Duration(r.cfg.Scheduler.PollIntervalMs) * time.Millisecond
+	if pollInterval <= 0 {
+		pollInterval = time.Second
+	}
+	schedulerRunCmd := &cobra.Command{
+		Use:   "run",
+		Short: "Run the scheduler in the foreground",
+		Long: `Run the scheduler until interrupted with Ctrl-C.
+
+Every enabled task whose schedule is due is executed, bounded by
+collector.max_concurrent_tasks. Successful runs record their timestamp, so an
+interval or daily schedule fires once per period; failed runs retry on the next
+tick. The first tick fires immediately, which runs startup tasks and the first
+interval runs.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return r.runScheduler(cmd.Context(), pollInterval)
+		},
+	}
+	schedulerRunCmd.Flags().DurationVar(&pollInterval, "poll-interval",
+		time.Duration(r.cfg.Scheduler.PollIntervalMs)*time.Millisecond,
+		"how often to check for due tasks, default from config.scheduler.poll_interval_ms")
+	schedulerCmd.AddCommand(schedulerRunCmd)
+	cmd.AddCommand(schedulerCmd)
 
 	// collector run
 	runCmd := &cobra.Command{
@@ -224,7 +267,7 @@ func (r *RootCmd) runTaskList() {
 	}
 }
 
-func (r *RootCmd) runTaskAdd(name, source, interfaceName, table string, params map[string]interface{}) error {
+func (r *RootCmd) runTaskAdd(name, source, interfaceName, table string, params map[string]interface{}, schedule collector.TaskSchedule) error {
 	if source == "" {
 		return errors.New("--source flag required")
 	}
@@ -235,12 +278,35 @@ func (r *RootCmd) runTaskAdd(name, source, interfaceName, table string, params m
 		return errors.New("--table flag required")
 	}
 
-	task, err := r.collector.AddTask(name, source, interfaceName, table, "core", params)
+	task, err := r.collector.AddTask(name, source, interfaceName, table, "core", params, schedule)
 	if err != nil {
 		return fmt.Errorf("add task: %w", err)
 	}
 
 	fmt.Printf("Task created: %s (ID: %s)\n", task.Name, task.ID)
+	return nil
+}
+
+// validateSchedule rejects schedules that could never fire, so a misconfigured
+// task fails at creation time instead of silently never running.
+func validateSchedule(s collector.TaskSchedule) error {
+	switch s.Type {
+	case "", "manual", "startup":
+		return nil
+	case "interval":
+		if s.Interval == "" {
+			return errors.New("--schedule interval requires --schedule-interval")
+		}
+		if _, err := time.ParseDuration(s.Interval); err != nil {
+			return fmt.Errorf("invalid --schedule-interval %q: %w", s.Interval, err)
+		}
+	case "daily":
+		if _, err := time.Parse("15:04", s.Time); err != nil && s.Time != "" {
+			return fmt.Errorf("invalid --schedule-time %q, use HH:MM: %w", s.Time, err)
+		}
+	default:
+		return fmt.Errorf("unknown --schedule %q, use manual, interval, daily or startup", s.Type)
+	}
 	return nil
 }
 
@@ -257,9 +323,39 @@ func (r *RootCmd) runTaskInfo(taskID string) error {
 	fmt.Printf("Table:         %s\n", task.Table)
 	fmt.Printf("Layer:         %s\n", task.Layer)
 	fmt.Printf("Enabled:       %v\n", task.Enabled)
+	fmt.Printf("Schedule:      %s\n", scheduleString(task.Schedule))
+	fmt.Printf("Last Run:      %s\n", formatRunTime(task.LastRun))
 	fmt.Printf("Created:       %s\n", task.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("Updated:       %s\n", task.UpdatedAt.Format("2006-01-02 15:04:05"))
 	return nil
+}
+
+// scheduleString renders a schedule for a fixed-width column.
+func scheduleString(s collector.TaskSchedule) string {
+	switch s.Type {
+	case "":
+		return "manual"
+	case "interval":
+		if s.Interval == "" {
+			return "interval (missing interval)"
+		}
+		return "interval " + s.Interval
+	case "daily":
+		if s.Time == "" {
+			return "daily 00:00"
+		}
+		return "daily " + s.Time
+	default:
+		return s.Type
+	}
+}
+
+// formatRunTime shows a zero time as "-" instead of the zero date.
+func formatRunTime(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.Format("2006-01-02 15:04:05")
 }
 
 func (r *RootCmd) runTaskEnable(taskID string, enable bool) error {
@@ -329,6 +425,18 @@ func (r *RootCmd) runTaskRunAll(ctx context.Context, isJSON bool) error {
 		fmt.Printf("%-22s %-18s %-10s %-8d\n", run.RunID, run.TaskID, run.Status, run.Rows)
 	}
 	fmt.Printf("\n%d tasks, %d rows collected, %d failed\n", len(runs), totalRows, failed)
+	return nil
+}
+
+func (r *RootCmd) runScheduler(ctx context.Context, pollInterval time.Duration) error {
+	s := collector.NewScheduler(r.collector, r.logger)
+	s.SetPollInterval(pollInterval)
+	s.Start()
+	defer s.Stop()
+
+	fmt.Fprintf(os.Stderr, "Scheduler running, poll interval %s. Press Ctrl-C to stop.\n", pollInterval)
+	<-ctx.Done()
+	fmt.Fprintln(os.Stderr, "Scheduler stopped")
 	return nil
 }
 

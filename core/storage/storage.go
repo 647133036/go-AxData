@@ -203,10 +203,12 @@ func convertRecords(records []interface{}, table string) []interface{} {
 				isOpen = v
 			}
 			typed = append(typed, &schema.TradeCalRecord{
-				Exchange:     m["exchange"],
-				CalDate:      m["cal_date"],
-				IsOpen:       isOpen,
-				PretradeDate: m["pretrade_date"],
+				Exchange:        m["exchange"],
+				CalDate:         m["cal_date"],
+				IsOpen:          isOpen,
+				PretradeDate:    m["pretrade_date"],
+				MarketSentiment: m["market_sentiment"],
+				MarketAmount:    parseFloat(m["market_amount"]),
 			})
 
 		case "stock_basic_exchange":
@@ -224,6 +226,21 @@ func convertRecords(records []interface{}, table string) []interface{} {
 				ListDate:      m["list_date"],
 				DelistDate:    m["delist_date"],
 				ListingStatus: m["listing_status"],
+				LastPrice:     parseFloat(m["last_price"]),
+				PreClose:      parseFloat(m["pre_close"]),
+				Open:          parseFloat(m["open"]),
+				High:          parseFloat(m["high"]),
+				Low:           parseFloat(m["low"]),
+				Change:        parseFloat(m["change"]),
+				ChangePct:     parseFloat(m["change_pct"]),
+				Amount:        parseFloat(m["amount"]),
+				Volume:        parseFloat(m["volume"]),
+				TurnoverRate:  parseFloat(m["turnover_rate"]),
+				VolumeRatio:   parseFloat(m["volume_ratio"]),
+				TotalMarket:   parseFloat(m["total_market"]),
+				CircMarket:    parseFloat(m["circ_market"]),
+				PeTTM:         parseFloat(m["pe_ttm"]),
+				Pb:            parseFloat(m["pb"]),
 			})
 
 		case "fin_income":

@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
 	"github.com/electkismet/axdata-go/cmd"
 	"github.com/electkismet/axdata-go/core/api"
@@ -45,6 +47,14 @@ func main() {
 	if dataRoot == "" {
 		dataRoot = "./axdata_data"
 	}
+	// --data-root must reach config.Load, so the config file is read from the
+	// data root the caller asked for. cobra parses flags inside its command tree,
+	// after this point, so the flag is pre-scanned from os.Args here.
+	//
+	// A hand scan rather than pflag: a subcommand flag such as --port is unknown
+	// at this level, and pflag stops there, which would drop a --data-root that
+	// merely appears after it.
+	dataRoot = prescanDataRoot(dataRoot, os.Args[1:])
 
 	cfg, err := config.Load(dataRoot)
 	if err != nil {
@@ -80,15 +90,26 @@ func main() {
 	}
 	defer querier.Close()
 
-	collector, err := collector.NewCollector(cfg, store, logger)
+	col, err := collector.NewCollector(cfg, store, logger)
 	if err != nil {
 		logger.Fatal("init collector", zap.Error(err))
 	}
 
-	rootCmd := cmd.NewRootCommand(cfg, store, querier, collector, logger, pluginManager)
+	rootCmd := cmd.NewRootCommand(cfg, store, querier, col, logger, pluginManager)
 
-	server := api.NewAPIServer(cfg, store, querier, collector, logger, pluginManager)
-	rootCmd.AddCommand(cmd.NewAPIServeCmdForServer(server))
+	server := api.NewAPIServer(cfg, store, querier, col, logger, pluginManager)
+
+	// The scheduler only runs while a process lives long enough to own it. axdata
+	// api is that process, and scheduler.enabled is opt-in, so the flag is the
+	// only thing that starts it.
+	var scheduler *collector.Scheduler
+	if cfg.Scheduler.Enabled {
+		scheduler = collector.NewScheduler(col, logger)
+		if cfg.Scheduler.PollIntervalMs > 0 {
+			scheduler.SetPollInterval(time.Duration(cfg.Scheduler.PollIntervalMs) * time.Millisecond)
+		}
+	}
+	rootCmd.AddCommand(cmd.NewAPIServeCmdForServer(server, scheduler))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -96,4 +117,27 @@ func main() {
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		logger.Fatal("execute command", zap.Error(err))
 	}
+}
+
+// prescanDataRoot finds --data-root anywhere in argv and returns the directory
+// it names, or fallback. Both --data-root <dir> and --data-root=<dir> work, in
+// either position, because cobra binds the flag only inside its own command
+// tree and runs after this.
+func prescanDataRoot(fallback string, args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--data-root" || arg == "-data-root" {
+			if i+1 < len(args) {
+				i++
+				if v := args[i]; v != "" && !strings.HasPrefix(v, "-") {
+					fallback = v
+				}
+			}
+			continue
+		}
+		if v, ok := strings.CutPrefix(arg, "--data-root="); ok {
+			fallback = v
+		}
+	}
+	return fallback
 }

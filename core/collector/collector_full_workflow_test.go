@@ -33,6 +33,7 @@ func TestCollectorFullWorkflow(t *testing.T) {
 			"end_date":      "2024-01-15",
 			"start_date":    "2024-01-01",
 		},
+		TaskSchedule{},
 	)
 	if err != nil {
 		t.Fatalf("AddTask failed: %v", err)
