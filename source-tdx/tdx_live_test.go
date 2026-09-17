@@ -69,3 +69,32 @@ func TestLive_TDXCommands(t *testing.T) {
 	}
 	t.Logf("finance_info 000001 sz: %+v", rows[0])
 }
+
+// TestLive_TDXExtendedHostsKline probes 7727 extended-market hosts to see if
+// they return historical kline data (unlike 7709 quote hosts which don't).
+func TestLive_TDXExtendedHostsKline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping live test in short mode")
+	}
+	ctx := context.Background()
+	a := NewTDXAdapter(DEFAULT_EXTENDED_HOSTS)
+
+	// Try kline for 000001.SZ daily bars
+	rows, err := a.Request(ctx, map[string]interface{}{
+		"interface":  "stock_kline_daily_tdx",
+		"market":     "sz",
+		"stock_code": "000001",
+		"start":      0,
+		"count":      10,
+	})
+	if err != nil {
+		t.Logf("7727 kline error: %v", err)
+		t.Log("7727 hosts do not support kline (same as 7709)")
+		return
+	}
+	if len(rows) == 0 {
+		t.Log("7727 kline returned 0 rows")
+		return
+	}
+	t.Logf("7727 kline SUCCESS: %d rows, first=%+v", len(rows), rows[0])
+}
