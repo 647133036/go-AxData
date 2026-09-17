@@ -499,6 +499,8 @@ func (s *APIServer) collectorStatusHandler(w http.ResponseWriter, r *http.Reques
 		"total_runs":     len(runs),
 		"max_concurrent": int(s.cfg.Collector.MaxConcurrentTasks),
 		"batch_size":     int(s.cfg.Collector.BatchSize),
+		"retry_count":    int(s.cfg.Collector.RetryCount),
+		"timeout_ms":     int(s.cfg.Collector.TimeoutMs),
 	})
 }
 
@@ -565,6 +567,8 @@ func (s *APIServer) configHandler(w http.ResponseWriter, r *http.Request) {
 		"api_port":       s.cfg.APIPort,
 		"max_concurrent": int(s.cfg.Collector.MaxConcurrentTasks),
 		"batch_size":     int(s.cfg.Collector.BatchSize),
+		"retry_count":    int(s.cfg.Collector.RetryCount),
+		"timeout_ms":     int(s.cfg.Collector.TimeoutMs),
 	})
 }
 

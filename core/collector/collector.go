@@ -414,27 +414,49 @@ func (c *Collector) RunTask(ctx context.Context, taskID string) (*Run, error) {
 		zap.String("task_id", taskID),
 		zap.String("run_id", r.RunID))
 
-	// Execute the task
-	rows, err := c.executeTask(ctx, t)
+	// Execute the task. RetryCount controls how many additional attempts
+	// are made after a failure. A zero or negative RetryCount means a
+	// single attempt with no retry.
+	maxAttempts := 1
+	if rc := c.config.Collector.RetryCount; rc > 0 {
+		maxAttempts += rc
+	}
+
+	var rows int
+	var execErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		rows, execErr = c.executeTask(ctx, t)
+		if execErr == nil {
+			break
+		}
+		if attempt < maxAttempts-1 {
+			c.logger.Warn("run retry",
+				zap.String("task_id", taskID),
+				zap.String("run_id", r.RunID),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_attempts", maxAttempts),
+				zap.Error(execErr))
+		}
+	}
 
 	// Update the record under the lock. saveMetadata marshals every *Run in the
 	// map, so writing these fields outside it would race with that read.
 	c.runsMu.Lock()
 	r.Rows = rows
 	r.EndedAt = time.Now()
-	if err != nil {
+	if execErr != nil {
 		r.Status = "failed"
-		r.Error = err.Error()
+		r.Error = execErr.Error()
 	} else {
 		r.Status = "success"
 	}
 	c.runs[r.RunID] = r
 	c.runsMu.Unlock()
 
-	if err != nil {
+	if execErr != nil {
 		c.logger.Error("run failed",
 			zap.String("run_id", r.RunID),
-			zap.Error(err))
+			zap.Error(execErr))
 	} else {
 		c.logger.Info("run completed",
 			zap.String("run_id", r.RunID),
@@ -527,8 +549,19 @@ func (c *Collector) executeTask(ctx context.Context, task *Task) (int, error) {
 	// source's own throttle. A zero or negative interval disables the wait.
 	c.paceRequest(ctx, task.Source)
 
+	// Derive per-request timeout. TimeoutMs bounds the adapter call only;
+	// paceRequest uses the original context so throttle waits don't eat
+	// into the request deadline. A zero or negative TimeoutMs disables
+	// the override and the adapter uses its own deadline (or none).
+	reqCtx := ctx
+	if tms := c.config.Collector.TimeoutMs; tms > 0 {
+		var cancel context.CancelFunc
+		reqCtx, cancel = context.WithTimeout(ctx, time.Duration(tms)*time.Millisecond)
+		defer cancel()
+	}
+
 	// Execute request
-	data, err := adapter.Request(ctx, params)
+	data, err := adapter.Request(reqCtx, params)
 	if err != nil {
 		return 0, fmt.Errorf("source request: %w", err)
 	}
