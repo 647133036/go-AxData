@@ -96,6 +96,9 @@ func (q *Querier) ExecuteWithColumns(ctx context.Context, sql string, params ...
 // a second request against the same name would otherwise fail with "relation
 // already exists" and surface as a 500.
 func (q *Querier) AttachParquet(ctx context.Context, table string, path string) error {
+	if !validIdentifier(table) {
+		return fmt.Errorf("invalid table name: %s", table)
+	}
 	_, err := q.conn.ExecContext(ctx, fmt.Sprintf("CREATE OR REPLACE TABLE %s AS SELECT * FROM read_parquet(%s)", table, quoteSQL(path)))
 	if err != nil {
 		return fmt.Errorf("attach parquet: %w", err)
@@ -109,6 +112,24 @@ func quoteSQL(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// validIdentifier returns true if s is a safe SQL identifier (letters, digits,
+// underscores only, must start with a letter or underscore).
+func validIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, c := range s {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' {
+			continue
+		}
+		if i > 0 && c >= '0' && c <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // ValidateSQL rejects SQL that can write, modify the catalog, load external
 // code, or reach the network.
 //
@@ -118,12 +139,12 @@ func quoteSQL(s string) string {
 // URLs. A query API reachable without authentication needs all of these shut
 // off, since the statement is fully client-supplied.
 var blockedSQL = []string{
-	"DROP ", "DROP(", "DELETE ", "ALTER ", "CREATE ", "INSERT ", "UPDATE ",
-	"MERGE ", "COPY ", "VACUUM ", "ATTACH ", "DETACH ",
-	"INSTALL ", "LOAD ",
-	"read_csv", "read_parquet", "read_json", "read_text", "read_blob",
-	"read_xml", "read_xlsx", "http_get", "http_post", "http_headers",
-	"curl", "system", "shell",
+	"DROP", "DELETE", "ALTER", "CREATE", "INSERT", "UPDATE",
+	"MERGE", "COPY", "VACUUM", "ATTACH", "DETACH",
+	"INSTALL", "LOAD",
+	"READ_CSV", "READ_PARQUET", "READ_JSON", "READ_TEXT", "READ_BLOB",
+	"READ_XML", "READ_XLSX", "HTTP_GET", "HTTP_POST", "HTTP_HEADERS",
+	"CURL", "SYSTEM", "SHELL",
 	"--", ";",
 }
 
@@ -131,8 +152,11 @@ var blockedSQL = []string{
 // Note: This is a basic guard; for full safety use parameterized queries.
 func ValidateSQL(sql string) error {
 	upper := strings.ToUpper(strings.TrimSpace(sql))
+	// Normalize all whitespace to single spaces so tabs/newlines
+	// cannot split a blocked keyword and evade detection.
+	upper = strings.Join(strings.Fields(upper), " ")
 	for _, keyword := range blockedSQL {
-		if strings.Contains(upper, strings.ToUpper(keyword)) {
+		if strings.Contains(upper, keyword) {
 			return fmt.Errorf("sql contains blocked keyword: %s", keyword)
 		}
 	}
