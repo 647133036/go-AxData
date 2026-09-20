@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 // TDX (通达信) 7709 binary protocol constants from upstream pytdx.
@@ -505,10 +508,12 @@ func parseRows(cmdName interface{}, resp *WireResponse) ([]map[string]interface{
 		return parseQuotesRows(resp, n == "explicit_quotes")
 	case "category_quotes":
 		return parseCategoryQuoteRows(resp)
+	case "index_kline_tdx":
+		return parseKlineRows(resp, true)
 	case "kline", "kline_daily", "kline_weekly", "kline_monthly",
 		"stock_kline_daily_tdx", "stock_kline_weekly_tdx", "stock_kline_monthly_tdx",
-		"index_kline_tdx", "etf_kline_tdx":
-		return parseKlineRows(resp)
+		"etf_kline_tdx":
+		return parseKlineRows(resp, false)
 	case "price_limits", "stock_daily_price_limit_tdx":
 		return parsePriceLimitsRows(resp)
 	case "today_trades":
@@ -890,7 +895,7 @@ func parseSecurityCountRows(resp *WireResponse) ([]map[string]interface{}, error
 //	29×4 bytes  float32 financial fields (each ×10000 except gudongrenshu and the last two)
 func parseFinanceInfoRows(resp *WireResponse) ([]map[string]interface{}, error) {
 	data := resp.Data
-	if len(data) < 2+7+16 {
+	if len(data) < 2+7+4+2+2+4+4+29*4 {
 		return nil, errors.New("finance info: payload too short")
 	}
 	pos := 2 // skip ret_count
@@ -970,11 +975,12 @@ func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{
 		active1 := binary.LittleEndian.Uint16(data[pos+7 : pos+9])
 		pos += 9
 
-		closeRaw, pos := varint(data, pos)
-		preCloseDiff, pos := varint(data, pos)
-		openDiff, pos := varint(data, pos)
-		highDiff, pos := varint(data, pos)
-		lowDiff, pos := varint(data, pos)
+		var closeRaw, preCloseDiff, openDiff, highDiff, lowDiff int64
+		closeRaw, pos = varint(data, pos)
+		preCloseDiff, pos = varint(data, pos)
+		openDiff, pos = varint(data, pos)
+		highDiff, pos = varint(data, pos)
+		lowDiff, pos = varint(data, pos)
 
 		close := float64(closeRaw) / 100.0
 		preClose := float64(closeRaw+preCloseDiff) / 100.0
@@ -984,8 +990,9 @@ func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{
 
 		_, pos = varint(data, pos) // time_raw
 		_, pos = varint(data, pos) // unknown
-		totalHand, pos := varint(data, pos)
-		currentHand, pos := varint(data, pos)
+		var totalHand, currentHand int64
+		totalHand, pos = varint(data, pos)
+		currentHand, pos = varint(data, pos)
 
 		amountRaw := uint32(0)
 		if pos+4 <= len(data) {
@@ -993,8 +1000,9 @@ func parseQuotesRows(resp *WireResponse, explicit bool) ([]map[string]interface{
 			pos += 4
 		}
 
-		insideDish, pos := varint(data, pos)
-		outerDisc, pos := varint(data, pos)
+		var insideDish, outerDisc int64
+		insideDish, pos = varint(data, pos)
+		outerDisc, pos = varint(data, pos)
 
 		// 5 levels of bid/ask
 		bidLevels := make([]QuoteLevel, 5)
@@ -1062,11 +1070,12 @@ func parseCategoryQuoteRows(resp *WireResponse) ([]map[string]interface{}, error
 		active1 := binary.LittleEndian.Uint16(data[pos+7 : pos+9])
 		pos += 9
 
-		closeRaw, pos := varint(data, pos)
-		preCloseDiff, pos := varint(data, pos)
-		openDiff, pos := varint(data, pos)
-		highDiff, pos := varint(data, pos)
-		lowDiff, pos := varint(data, pos)
+		var closeRaw, preCloseDiff, openDiff, highDiff, lowDiff int64
+		closeRaw, pos = varint(data, pos)
+		preCloseDiff, pos = varint(data, pos)
+		openDiff, pos = varint(data, pos)
+		highDiff, pos = varint(data, pos)
+		lowDiff, pos = varint(data, pos)
 
 		close := float64(closeRaw) / 100.0
 		preClose := float64(closeRaw+preCloseDiff) / 100.0
@@ -1076,8 +1085,9 @@ func parseCategoryQuoteRows(resp *WireResponse) ([]map[string]interface{}, error
 
 		_, pos = varint(data, pos) // time_raw
 		_, pos = varint(data, pos) // unknown
-		totalHand, pos := varint(data, pos)
-		currentHand, pos := varint(data, pos)
+		var totalHand, currentHand int64
+		totalHand, pos = varint(data, pos)
+		currentHand, pos = varint(data, pos)
 
 		amountRaw := uint32(0)
 		if pos+4 <= len(data) {
@@ -1124,7 +1134,7 @@ func parseCategoryQuoteRows(resp *WireResponse) ([]map[string]interface{}, error
 	return rows, nil
 }
 
-func parseKlineRows(resp *WireResponse) ([]map[string]interface{}, error) {
+func parseKlineRows(resp *WireResponse, index bool) ([]map[string]interface{}, error) {
 	data := resp.Data
 	if len(data) < 2 {
 		return nil, errors.New("kline: payload too short")
@@ -1141,10 +1151,11 @@ func parseKlineRows(resp *WireResponse) ([]map[string]interface{}, error) {
 		timeRaw := binary.LittleEndian.Uint32(data[pos : pos+4])
 		pos += 4
 
-		openDelta, pos := varint(data, pos)
-		closeDelta, pos := varint(data, pos)
-		highDelta, pos := varint(data, pos)
-		lowDelta, pos := varint(data, pos)
+		var openDelta, closeDelta, highDelta, lowDelta int64
+		openDelta, pos = varint(data, pos)
+		closeDelta, pos = varint(data, pos)
+		highDelta, pos = varint(data, pos)
+		lowDelta, pos = varint(data, pos)
 
 		open := lastClose + openDelta
 		close := open + closeDelta
@@ -1161,46 +1172,52 @@ func parseKlineRows(resp *WireResponse) ([]map[string]interface{}, error) {
 			pos += 4
 		}
 
-		// For indexes, skip 4-byte breadth
-		if pos+4 <= len(data) {
-			_ = binary.LittleEndian.Uint32(data[pos:])
+		upCount := 0
+		downCount := 0
+		if index && pos+4 <= len(data) {
+			upCount = int(binary.LittleEndian.Uint16(data[pos:]))
+			downCount = int(binary.LittleEndian.Uint16(data[pos+2:]))
 			pos += 4
 		}
 
-		rows = append(rows, map[string]interface{}{
+		row := map[string]interface{}{
 			"trade_date":  timeRaw,
 			"open":        float64(open) / 1000.0,
 			"high":        float64(high) / 1000.0,
 			"low":         float64(low) / 1000.0,
 			"close":       float64(close) / 1000.0,
 			"volume":      int(volumeRaw),
-			"amount":      compactFloat(int(volumeRaw)), // amount encoded as compact float
+			"amount":      compactFloat(int(amountRaw)),
 			"volume_raw":  int(volumeRaw),
 			"amount_raw":  int(amountRaw),
 			"open_delta":  int(openDelta),
 			"close_delta": int(closeDelta),
 			"high_delta":  int(highDelta),
 			"low_delta":   int(lowDelta),
-		})
+		}
+		if index {
+			row["up_count"] = upCount
+			row["down_count"] = downCount
+		}
+		rows = append(rows, row)
 	}
 	return rows, nil
 }
 
 func parsePriceLimitsRows(resp *WireResponse) ([]map[string]interface{}, error) {
 	data := resp.Data
-	// Simplified: count in first 2 bytes, records follow
 	if len(data) < 2 {
 		return nil, errors.New("price limits: payload too short")
 	}
 	count := int(binary.LittleEndian.Uint16(data[:2]))
 	rows := make([]map[string]interface{}, 0, count)
 	pos := 2
-	for i := 0; i < count && pos+13 <= len(data); i++ {
+	const recSize = 15
+	for i := 0; i < count && pos+recSize <= len(data); i++ {
 		code := ascii2str(data[pos+1 : pos+7])
-		// price limit record is 13 bytes
 		upLimit := binary.LittleEndian.Uint32(data[pos+7 : pos+11])
-		dnLimit := binary.LittleEndian.Uint32(data[pos+11 : pos+13])
-		pos += 13
+		dnLimit := binary.LittleEndian.Uint32(data[pos+11 : pos+15])
+		pos += recSize
 		rows = append(rows, map[string]interface{}{
 			"symbol":      code,
 			"upper_limit": upLimit,
@@ -1219,7 +1236,7 @@ func parseTodayTradesRows(resp *WireResponse) ([]map[string]interface{}, error) 
 	var rows []map[string]interface{}
 	pos := 2
 	for i := 0; i < count; i++ {
-		if pos+8 > len(data) {
+		if pos+13 > len(data) {
 			break
 		}
 		// Simplified: 4 bytes time, 4 bytes price, 4 bytes volume, ...
@@ -1260,8 +1277,8 @@ func varint(data []byte, pos int) (int64, int) {
 	neg := (first>>6)&1 == 1
 	v = int64(first & 0x3F)
 	shift = 6
+	pos++
 	if first&0x80 != 0 {
-		pos++
 		for pos < len(data) {
 			b := data[pos]
 			v += int64(b&0x7F) << shift
@@ -1272,7 +1289,6 @@ func varint(data []byte, pos int) (int64, int) {
 			}
 		}
 	}
-	pos++
 	if neg {
 		v = -v
 	}
@@ -1527,36 +1543,36 @@ func ascii2str(b []byte) string {
 }
 
 func gbk2str(b []byte) string {
-	s := make([]byte, 0, len(b))
-	for i := 0; i < len(b); {
-		if b[i] == 0 {
-			break
-		}
-		if b[i] > 0x7F && i+1 < len(b) && b[i+1] > 0x7F {
-			s = append(s, b[i], b[i+1])
-			i += 2
-		} else {
-			s = append(s, b[i])
-			i++
-		}
+	n := 0
+	for n < len(b) && b[n] != 0 {
+		n++
 	}
-	// Best-effort UTF-8 decode for GBK bytes; real impl would use gbk decoder
-	return string(s)
+	b = b[:n]
+	decoded, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), b)
+	if err != nil {
+		return string(b)
+	}
+	return string(decoded)
 }
 
 func splitCSV(s string) []string {
 	var out []string
+	var cur strings.Builder
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
 	for _, r := range s {
 		switch r {
 		case ',', ';', '|', ' ', '\n', '\t':
-			out = append(out, "")
+			flush()
 		default:
-			if len(out) == 0 {
-				out = append(out, "")
-			}
-			out[len(out)-1] += string(r)
+			cur.WriteRune(r)
 		}
 	}
+	flush()
 	return out
 }
 
@@ -1591,9 +1607,15 @@ func intval(params map[string]interface{}, key string, defaultv int) int {
 		return int(t)
 	case uint64:
 		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
 	case string:
 		var n int
-		fmt.Sscanf(t, "%d", &n)
+		if _, err := fmt.Sscanf(t, "%d", &n); err != nil {
+			return defaultv
+		}
 		return n
 	default:
 		return defaultv

@@ -637,6 +637,7 @@ func TestIntval(t *testing.T) {
 	params := map[string]interface{}{
 		"key1": 42,
 		"str1": "7",
+		"f64":  float64(800),
 	}
 	if intval(params, "key1", 0) != 42 {
 		t.Errorf("intval(int): got unexpected value")
@@ -644,8 +645,11 @@ func TestIntval(t *testing.T) {
 	if intval(params, "str1", 0) != 7 {
 		t.Errorf("intval(string): got unexpected value")
 	}
+	if intval(params, "f64", 0) != 800 {
+		t.Errorf("intval(float64): got unexpected value")
+	}
 	if intval(params, "missing", 99) != 99 {
-		t.Errorf("intval(missing): got unexpected value")
+		t.Errorf("intval(missing): got unexpected default")
 	}
 }
 
@@ -765,5 +769,364 @@ func TestDeadlineFromContext(t *testing.T) {
 	result := deadlineFromContext(ctx, 3)
 	if result.IsZero() {
 		t.Fatal("deadlineFromContext returned zero time")
+	}
+}
+
+func encodeKlineBar(timeRaw uint32, openD, closeD, highD, lowD byte, vol, amount uint32, index bool, up, down uint16) []byte {
+	buf := make([]byte, 0, 20)
+	tmp := make([]byte, 4)
+	binary.LittleEndian.PutUint32(tmp, timeRaw)
+	buf = append(buf, tmp...)
+	buf = append(buf, openD, closeD, highD, lowD)
+	binary.LittleEndian.PutUint32(tmp, vol)
+	buf = append(buf, tmp...)
+	binary.LittleEndian.PutUint32(tmp, amount)
+	buf = append(buf, tmp...)
+	if index {
+		u := make([]byte, 4)
+		binary.LittleEndian.PutUint16(u[0:], up)
+		binary.LittleEndian.PutUint16(u[2:], down)
+		buf = append(buf, u...)
+	}
+	return buf
+}
+
+func TestParseKlineRowsStockDoesNotSkipBreadth(t *testing.T) {
+	bar1 := encodeKlineBar(100, 10, 5, 8, 2, 111, 222, false, 0, 0)
+	bar2 := encodeKlineBar(200, 1, 2, 3, 0, 333, 444, false, 0, 0)
+	body := make([]byte, 2, 2+len(bar1)+len(bar2))
+	binary.LittleEndian.PutUint16(body, 2)
+	body = append(body, bar1...)
+	body = append(body, bar2...)
+
+	rows, err := parseKlineRows(&WireResponse{Data: body}, false)
+	if err != nil {
+		t.Fatalf("parseKlineRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0]["trade_date"] != uint32(100) {
+		t.Errorf("bar1 trade_date: got %v want 100", rows[0]["trade_date"])
+	}
+	if rows[0]["volume"] != 111 {
+		t.Errorf("bar1 volume: got %v want 111", rows[0]["volume"])
+	}
+	if rows[1]["trade_date"] != uint32(200) {
+		t.Errorf("bar2 trade_date: got %v want 200", rows[1]["trade_date"])
+	}
+	if rows[1]["volume"] != 333 {
+		t.Errorf("bar2 volume: got %v want 333", rows[1]["volume"])
+	}
+}
+
+func TestParseKlineRowsIndexReadsBreadth(t *testing.T) {
+	bar := encodeKlineBar(100, 10, 5, 8, 2, 111, 222, true, 1200, 800)
+	body := make([]byte, 2, 2+len(bar))
+	binary.LittleEndian.PutUint16(body, 1)
+	body = append(body, bar...)
+
+	rows, err := parseKlineRows(&WireResponse{Data: body}, true)
+	if err != nil {
+		t.Fatalf("parseKlineRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0]["up_count"] != 1200 {
+		t.Errorf("up_count: got %v want 1200", rows[0]["up_count"])
+	}
+	if rows[0]["down_count"] != 800 {
+		t.Errorf("down_count: got %v want 800", rows[0]["down_count"])
+	}
+}
+
+func TestParsePriceLimitsRows(t *testing.T) {
+	rec := make([]byte, 15)
+	rec[0] = 0
+	copy(rec[1:7], []byte("000001"))
+	binary.LittleEndian.PutUint32(rec[7:11], 1100)
+	binary.LittleEndian.PutUint32(rec[11:15], 900)
+	body := make([]byte, 2+15)
+	binary.LittleEndian.PutUint16(body[:2], 1)
+	copy(body[2:], rec)
+
+	rows, err := parsePriceLimitsRows(&WireResponse{Data: body})
+	if err != nil {
+		t.Fatalf("parsePriceLimitsRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if rows[0]["symbol"] != "000001" {
+		t.Errorf("symbol: got %v want 000001", rows[0]["symbol"])
+	}
+	if rows[0]["upper_limit"] != uint32(1100) {
+		t.Errorf("upper_limit: got %v want 1100", rows[0]["upper_limit"])
+	}
+	if rows[0]["lower_limit"] != uint32(900) {
+		t.Errorf("lower_limit: got %v want 900", rows[0]["lower_limit"])
+	}
+}
+
+// putVarint8 encodes a signed value as a single-byte TDX varint: bits 0-5 hold
+// the magnitude, bit 6 the sign. Values outside [-63, 63] are not representable.
+func putVarint8(v int64) byte {
+	m := v
+	if m < 0 {
+		m = -m
+	}
+	b := byte(m & 0x3F)
+	if v < 0 {
+		b |= 0x40
+	}
+	return b
+}
+
+func putVarintFull(v int64) []byte {
+	m := v
+	neg := false
+	if m < 0 {
+		m = -m
+		neg = true
+	}
+	first := byte(m & 0x3F)
+	if neg {
+		first |= 0x40
+	}
+	rest := m >> 6
+	if rest == 0 {
+		return []byte{first}
+	}
+	buf := []byte{first | 0x80}
+	for {
+		b := byte(rest & 0x7F)
+		rest >>= 7
+		if rest > 0 {
+			b |= 0x80
+		}
+		buf = append(buf, b)
+		if rest == 0 {
+			break
+		}
+	}
+	return buf
+}
+
+func TestVarintRoundTrip(t *testing.T) {
+	for _, v := range []int64{-63, -1, 0, 1, 63, 64, 1000, -1000, 16384, -16384, 409600} {
+		buf := putVarintFull(v)
+		got, next := varint(buf, 0)
+		if got != v {
+			t.Errorf("varint(%x): got %d want %d", buf, got, v)
+		}
+		if next != len(buf) {
+			t.Errorf("varint(%x): pos %d want %d", buf, next, len(buf))
+		}
+	}
+	if got, _ := varint([]byte{0x7F}, 0); got != -63 {
+		t.Errorf("varint(0x7F): got %d want -63", got)
+	}
+	if got, _ := varint([]byte{}, 0); got != 0 {
+		t.Errorf("varint(empty): got %d want 0", got)
+	}
+}
+
+func encodeQuoteRecord(market byte, code string, active1 uint16, totalHand, amountRaw, insideDish int64) []byte {
+	buf := make([]byte, 0, 44)
+	buf = append(buf, market)
+	for i := 0; i < 6; i++ {
+		if i < len(code) {
+			buf = append(buf, code[i])
+		} else {
+			buf = append(buf, ' ')
+		}
+	}
+	buf = append(buf, byte(active1&0xFF), byte(active1>>8))
+	buf = append(buf, putVarint8(60)) // closeRaw
+	buf = append(buf, putVarint8(1))  // preCloseDiff
+	buf = append(buf, putVarint8(2))  // openDiff
+	buf = append(buf, putVarint8(3))  // highDiff
+	buf = append(buf, putVarint8(0))  // lowDiff
+	buf = append(buf, putVarint8(0))  // time_raw
+	buf = append(buf, putVarint8(0))  // unknown
+	buf = append(buf, putVarint8(totalHand))
+	buf = append(buf, putVarint8(totalHand/2))
+	amount := make([]byte, 4)
+	binary.LittleEndian.PutUint32(amount, uint32(amountRaw))
+	buf = append(buf, amount...)
+	buf = append(buf, putVarint8(insideDish))
+	buf = append(buf, putVarint8(insideDish*2))
+	for j := 0; j < 5; j++ {
+		buf = append(buf, putVarint8(int64(-j-1)))
+		buf = append(buf, putVarint8(int64(j+1)))
+		buf = append(buf, putVarint8(int64(j+1)))
+		buf = append(buf, putVarint8(int64(10+j)))
+	}
+	return buf
+}
+
+func TestParseQuotesRowsAdvancesCursorAcrossSymbols(t *testing.T) {
+	rec1 := encodeQuoteRecord(0x00, "000001", 256, 40, 1234, 10)
+	rec2 := encodeQuoteRecord(0x01, "600519", 512, 50, 5678, 30)
+	body := make([]byte, 4, 4+len(rec1)+len(rec2))
+	binary.LittleEndian.PutUint16(body[2:], 2)
+	body = append(body, rec1...)
+	body = append(body, rec2...)
+
+	rows, err := parseQuotesRows(&WireResponse{Data: body}, false)
+	if err != nil {
+		t.Fatalf("parseQuotesRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+
+	first := rows[0]
+	if first["symbol"] != "000001" {
+		t.Errorf("row1 symbol: got %v want 000001", first["symbol"])
+	}
+	if first["exchange"] != "SZSE" {
+		t.Errorf("row1 exchange: got %v want SZSE", first["exchange"])
+	}
+	if first["open"] != 0.62 || first["close"] != 0.6 || first["high"] != 0.63 || first["low"] != 0.6 {
+		t.Errorf("row1 ohlc: got %v/%v/%v/%v want 0.62/0.6/0.63/0.6", first["open"], first["close"], first["high"], first["low"])
+	}
+	if first["pre_close"] != 0.61 {
+		t.Errorf("row1 pre_close: got %v want 0.61", first["pre_close"])
+	}
+	if first["total_volume"] != 40 || first["current_volume"] != 20 {
+		t.Errorf("row1 volumes: got %v/%v want 40/20", first["total_volume"], first["current_volume"])
+	}
+	if first["amount_raw"] != 1234 {
+		t.Errorf("row1 amount_raw: got %v want 1234", first["amount_raw"])
+	}
+	if first["inside_dish"] != int64(10) || first["outer_disc"] != int64(20) {
+		t.Errorf("row1 dishes: got %v/%v want 10/20", first["inside_dish"], first["outer_disc"])
+	}
+	if first["bid_vol_sum"] != int64(15) || first["ask_vol_sum"] != int64(60) {
+		t.Errorf("row1 bid/ask sums: got %v/%v want 15/60", first["bid_vol_sum"], first["ask_vol_sum"])
+	}
+	if first["active1"] != 256 {
+		t.Errorf("row1 active1: got %v want 256", first["active1"])
+	}
+
+	second := rows[1]
+	if second["symbol"] != "600519" {
+		t.Errorf("row2 symbol: got %v want 600519", second["symbol"])
+	}
+	if second["exchange"] != "SSE" {
+		t.Errorf("row2 exchange: got %v want SSE", second["exchange"])
+	}
+	if second["tdx_code"] != "sh600519" {
+		t.Errorf("row2 tdx_code: got %v want sh600519", second["tdx_code"])
+	}
+	if second["total_volume"] != 50 {
+		t.Errorf("row2 total_volume: got %v want 50", second["total_volume"])
+	}
+	if second["amount_raw"] != 5678 {
+		t.Errorf("row2 amount_raw: got %v want 5678", second["amount_raw"])
+	}
+	if second["inside_dish"] != int64(30) || second["outer_disc"] != int64(60) {
+		t.Errorf("row2 dishes: got %v/%v want 30/60", second["inside_dish"], second["outer_disc"])
+	}
+	if second["bid_vol_sum"] != int64(15) {
+		t.Errorf("row2 bid_vol_sum: got %v want 15", second["bid_vol_sum"])
+	}
+}
+
+func encodeCategoryQuoteRecord(market byte, code string, active1 uint16, totalHand, amountRaw int64) []byte {
+	buf := make([]byte, 0, 84)
+	buf = append(buf, market)
+	for i := 0; i < 6; i++ {
+		if i < len(code) {
+			buf = append(buf, code[i])
+		} else {
+			buf = append(buf, ' ')
+		}
+	}
+	buf = append(buf, byte(active1&0xFF), byte(active1>>8))
+	buf = append(buf, putVarint8(60))
+	buf = append(buf, putVarint8(1))
+	buf = append(buf, putVarint8(2))
+	buf = append(buf, putVarint8(3))
+	buf = append(buf, putVarint8(0))
+	buf = append(buf, putVarint8(0))
+	buf = append(buf, putVarint8(0))
+	buf = append(buf, putVarint8(totalHand))
+	buf = append(buf, putVarint8(totalHand/2))
+	amount := make([]byte, 4)
+	binary.LittleEndian.PutUint32(amount, uint32(amountRaw))
+	buf = append(buf, amount...)
+	buf = append(buf, putVarint8(0))
+	buf = append(buf, putVarint8(0))
+	buf = append(buf, putVarint8(-1))
+	buf = append(buf, putVarint8(1))
+	buf = append(buf, putVarint8(7))
+	buf = append(buf, putVarint8(8))
+	buf = append(buf, make([]byte, 56)...)
+	return buf
+}
+
+func TestParseCategoryQuoteRowsAdvancesCursorAcrossSymbols(t *testing.T) {
+	rec1 := encodeCategoryQuoteRecord(0x01, "600519", 777, 40, 4321)
+	rec2 := encodeCategoryQuoteRecord(0x00, "000001", 256, 50, 8642)
+	body := make([]byte, 4, 4+len(rec1)+len(rec2))
+	binary.LittleEndian.PutUint16(body[2:], 2)
+	body = append(body, rec1...)
+	body = append(body, rec2...)
+
+	rows, err := parseCategoryQuoteRows(&WireResponse{Data: body})
+	if err != nil {
+		t.Fatalf("parseCategoryQuoteRows: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+
+	first := rows[0]
+	if first["symbol"] != "600519" {
+		t.Errorf("row1 symbol: got %v want 600519", first["symbol"])
+	}
+	if first["exchange"] != "SSE" {
+		t.Errorf("row1 exchange: got %v want SSE", first["exchange"])
+	}
+	if first["close"] != 0.6 {
+		t.Errorf("row1 close: got %v want 0.6", first["close"])
+	}
+	if first["total_volume"] != 40 || first["current_volume"] != 20 {
+		t.Errorf("row1 volumes: got %v/%v want 40/20", first["total_volume"], first["current_volume"])
+	}
+	if first["amount_raw"] != 4321 {
+		t.Errorf("row1 amount_raw: got %v want 4321", first["amount_raw"])
+	}
+	if first["active1"] != 777 {
+		t.Errorf("row1 active1: got %v want 777", first["active1"])
+	}
+	if first["bid1_price"] != 0.59 || first["bid1_volume"] != 7 {
+		t.Errorf("row1 bid1: got %v/%v want 0.59/7", first["bid1_price"], first["bid1_volume"])
+	}
+	if first["ask1_price"] != 0.61 || first["ask1_volume"] != 8 {
+		t.Errorf("row1 ask1: got %v/%v want 0.61/8", first["ask1_price"], first["ask1_volume"])
+	}
+
+	second := rows[1]
+	if second["symbol"] != "000001" {
+		t.Errorf("row2 symbol: got %v want 000001", second["symbol"])
+	}
+	if second["exchange"] != "SZSE" {
+		t.Errorf("row2 exchange: got %v want SZSE", second["exchange"])
+	}
+	if second["tdx_code"] != "sz000001" {
+		t.Errorf("row2 tdx_code: got %v want sz000001", second["tdx_code"])
+	}
+	if second["total_volume"] != 50 {
+		t.Errorf("row2 total_volume: got %v want 50", second["total_volume"])
+	}
+	if second["amount_raw"] != 8642 {
+		t.Errorf("row2 amount_raw: got %v want 8642", second["amount_raw"])
+	}
+	if second["bid1_volume"] != 7 {
+		t.Errorf("row2 bid1_volume: got %v want 7", second["bid1_volume"])
 	}
 }
