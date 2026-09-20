@@ -395,18 +395,16 @@ func TestSchedulerStartupRunsOnce(t *testing.T) {
 	defer s.Stop()
 
 	clock.Set(clock.Now().Add(5 * time.Second))
-	time.Sleep(300 * time.Millisecond)
-
-	if runs := runsForTask(c.ListRuns(), task.ID); len(runs) != 1 {
-		t.Fatalf("startup task ran %d times, want 1", len(runs))
-	}
-	got, ok := c.GetTask(task.ID)
-	if !ok {
-		t.Fatal("task missing")
-	}
-	if got.LastRun.IsZero() {
-		t.Error("LastRun not recorded after a startup run")
-	}
+	// Poll for both the run record and the MarkRuns commit. RunTask publishes
+	// the run to the map before the scheduler records LastRun, so a fixed
+	// sleep can land inside that gap and observe a zero LastRun.
+	eventually(t, 3*time.Second, func() bool {
+		if len(runsForTask(c.ListRuns(), task.ID)) != 1 {
+			return false
+		}
+		got, ok := c.GetTask(task.ID)
+		return ok && !got.LastRun.IsZero()
+	}, "startup run recorded with LastRun")
 }
 
 func TestSchedulerStopIsIdempotentAndBlocking(t *testing.T) {

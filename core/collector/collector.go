@@ -376,12 +376,13 @@ func (c *Collector) UpdateTask(id string, updates map[string]interface{}) error 
 // RunTask executes a collection task.
 func (c *Collector) RunTask(ctx context.Context, taskID string) (*Run, error) {
 	c.tasksMu.RLock()
-	t, ok := c.tasks[taskID]
-	c.tasksMu.RUnlock()
-
+	tp, ok := c.tasks[taskID]
 	if !ok {
+		c.tasksMu.RUnlock()
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
+	t := *tp
+	c.tasksMu.RUnlock()
 
 	if !t.Enabled {
 		return nil, fmt.Errorf("task is disabled: %s", taskID)
@@ -425,7 +426,7 @@ func (c *Collector) RunTask(ctx context.Context, taskID string) (*Run, error) {
 	var rows int
 	var execErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		rows, execErr = c.executeTask(ctx, t)
+		rows, execErr = c.executeTask(ctx, &t)
 		if execErr == nil {
 			break
 		}

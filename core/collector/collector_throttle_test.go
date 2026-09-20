@@ -190,7 +190,9 @@ func TestRequestIntervalMsThrottlesConcurrent(t *testing.T) {
 }
 
 // TestRequestIntervalZeroNoThrottle: a zero interval disables pacing entirely,
-// so a sequential pair fires back-to-back.
+// so no scheduled start time is ever recorded for the source. That map check is
+// the load-independent proof; the gap check below carries slack for timer and
+// scheduler jitter and only rules out a real wait.
 func TestRequestIntervalZeroNoThrottle(t *testing.T) {
 	col, adapter := newThrottleCollector(t, 0, 0)
 	id := addRowsTask(t, col)
@@ -201,12 +203,20 @@ func TestRequestIntervalZeroNoThrottle(t *testing.T) {
 	if _, err := col.RunTask(context.Background(), id); err != nil {
 		t.Fatalf("RunTask #2: %v", err)
 	}
+
+	col.throttleMu.Lock()
+	scheduled, throttled := col.throttle["rows-src"]
+	col.throttleMu.Unlock()
+	if throttled {
+		t.Fatalf("interval=0 recorded a scheduled start time: %v", scheduled)
+	}
+
 	times := adapter.callTimes()
 	if len(times) < 2 {
 		t.Fatalf("want >=2 recorded requests, got %d", len(times))
 	}
-	gap := times[1].Sub(times[0])
-	if gap >= 50*time.Millisecond {
-		t.Fatalf("gap = %v with interval=0, expected back-to-back", gap)
+	const maxGap = 500 * time.Millisecond
+	if gap := times[1].Sub(times[0]); gap >= maxGap {
+		t.Fatalf("gap = %v with interval=0, want < %v (pacing should not wait)", gap, maxGap)
 	}
 }
