@@ -9,6 +9,7 @@ axdata-go
 
 # Data
 axdata_data/
+data/
 *.parquet
 *.count
 
