@@ -69,7 +69,7 @@ func NewRootCommand(cfg *config.Config, store *storage.Store, querier *query.Que
 
 		// Written to stderr so that commands emitting JSON on stdout stay
 		// machine-parseable when piped.
-		fmt.Fprintf(os.Stderr, "AxData Go v2.0.0 - Quantitative Data Platform\n")
+		fmt.Fprintf(os.Stderr, "AxData Go v2.0.2 - Quantitative Data Platform\n")
 		fmt.Fprintf(os.Stderr, "Data root: %s\n", cfg.DataRoot)
 		fmt.Fprintf(os.Stderr, "Tables available: %d\n", len(schema.TableRegistryNames()))
 	}
