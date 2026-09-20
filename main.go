@@ -62,6 +62,7 @@ func main() {
 	}
 
 	source.Register(srcTdx.NewDefaultTDXAdapter())
+	source.Register(srcTdx.NewDefaultTDXExAdapter())
 	source.Register(srcTencent.NewTencentAdapter())
 	source.Register(srcCNINFO.NewCNINFOAdapter())
 	source.Register(srcSina.NewSinaAdapter())

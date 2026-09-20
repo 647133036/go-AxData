@@ -70,31 +70,45 @@ func TestLive_TDXCommands(t *testing.T) {
 	t.Logf("finance_info 000001 sz: %+v", rows[0])
 }
 
-// TestLive_TDXExtendedHostsKline probes 7727 extended-market hosts to see if
-// they return historical kline data (unlike 7709 quote hosts which don't).
-func TestLive_TDXExtendedHostsKline(t *testing.T) {
+// TestLive_TDXExCommands verifies the 7727 ExHq adapter against live hosts.
+func TestLive_TDXExCommands(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping live test in short mode")
 	}
 	ctx := context.Background()
-	a := NewTDXAdapter(DEFAULT_EXTENDED_HOSTS)
+	a := NewDefaultTDXExAdapter()
 
-	// Try kline for 000001.SZ daily bars
-	rows, err := a.Request(ctx, map[string]interface{}{
-		"interface":  "stock_kline_daily_tdx",
-		"market":     "sz",
-		"stock_code": "000001",
-		"start":      0,
-		"count":      10,
-	})
+	rows, err := a.Request(ctx, map[string]interface{}{"interface": "instrument_count"})
 	if err != nil {
-		t.Logf("7727 kline error: %v", err)
-		t.Log("7727 hosts do not support kline (same as 7709)")
-		return
+		t.Fatalf("instrument_count: %v", err)
 	}
 	if len(rows) == 0 {
-		t.Log("7727 kline returned 0 rows")
-		return
+		t.Fatal("instrument_count: no rows")
 	}
-	t.Logf("7727 kline SUCCESS: %d rows, first=%+v", len(rows), rows[0])
+	t.Logf("instrument_count: %+v", rows[0])
+
+	rows, err = a.Request(ctx, map[string]interface{}{"interface": "markets"})
+	if err != nil {
+		t.Fatalf("markets: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("markets: no rows")
+	}
+	t.Logf("markets: %d rows, first=%+v", len(rows), rows[0])
+
+	rows, err = a.Request(ctx, map[string]interface{}{
+		"interface": "instrument_bars",
+		"market":    31,
+		"code":      "00001",
+		"category":  EX_KLINE_DAILY,
+		"start":     0,
+		"count":     5,
+	})
+	if err != nil {
+		t.Fatalf("instrument_bars 00001: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("instrument_bars 00001: no rows")
+	}
+	t.Logf("instrument_bars 00001: %d rows, first=%+v", len(rows), rows[0])
 }
