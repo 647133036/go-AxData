@@ -87,8 +87,7 @@ func TestTencentAdapter_RequestUnknownInterface(t *testing.T) {
 }
 
 func TestTencentAdapter_RequestQuote_429(t *testing.T) {
-	// The tencent adapter does not check HTTP status codes; it reads the body regardless.
-	// A 429 returns empty body → parseQuoteString returns 0 results (not an error).
+	// The adapter rejects non-200 responses instead of parsing the body.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
 	}))
@@ -104,11 +103,11 @@ func TestTencentAdapter_RequestQuote_429(t *testing.T) {
 		"interface": "stock_quote_tencent",
 		"symbols":   "600519.SH",
 	})
-	if err != nil {
-		t.Fatalf("Request failed: %v", err)
+	if err == nil {
+		t.Fatalf("Expected error for HTTP 429, got results: %v", results)
 	}
-	if len(results) != 0 {
-		t.Errorf("Expected 0 results from 429, got %d", len(results))
+	if results != nil {
+		t.Errorf("Expected nil results from 429, got %d", len(results))
 	}
 }
 

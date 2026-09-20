@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -61,6 +62,12 @@ func (a *WencaiAdapter) Request(ctx context.Context, params map[string]interface
 	if v, ok := params["page"]; ok {
 		if i, ok := v.(int); ok && i > 0 {
 			page = i
+		} else if f, ok := v.(float64); ok && f > 0 {
+			page = int(f)
+		} else if s, ok := v.(string); ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n > 0 {
+				page = n
+			}
 		}
 	}
 
@@ -70,6 +77,10 @@ func (a *WencaiAdapter) Request(ctx context.Context, params map[string]interface
 			limit = i
 		} else if f, ok := v.(float64); ok && f > 0 {
 			limit = int(f)
+		} else if s, ok := v.(string); ok {
+			if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n > 0 {
+				limit = n
+			}
 		}
 	}
 
@@ -86,6 +97,9 @@ func (a *WencaiAdapter) getCookie(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("cookie request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("cookie HTTP %d", resp.StatusCode)
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -141,6 +155,9 @@ func (a *WencaiAdapter) queryWencai(ctx context.Context, query string, page, lim
 		return nil, fmt.Errorf("wencai request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("wencai HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

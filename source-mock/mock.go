@@ -34,8 +34,14 @@ func (a *MockAdapter) Description() string {
 // Request generates mock data.
 func (a *MockAdapter) Request(ctx context.Context, params map[string]interface{}) ([]map[string]interface{}, error) {
 	interfaceName, _ := params["interface"].(string)
-	limit, _ := params["limit"].(int)
-	if limit == 0 {
+	limit := 20
+	switch l := params["limit"].(type) {
+	case int:
+		limit = l
+	case float64:
+		limit = int(l)
+	}
+	if limit <= 0 {
 		limit = 20
 	}
 	symbol, _ := params["symbol"].(string)

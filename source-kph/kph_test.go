@@ -69,3 +69,44 @@ func TestLimitPID(t *testing.T) {
 		}
 	}
 }
+
+func TestKPHPostErrcodeZeroFloat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"errcode":0,"info":{"ZT":1}}`))
+	}))
+	defer server.Close()
+
+	a := NewKPHAdapter()
+	payload, err := a.post(context.Background(), nil, server.URL, map[string]string{"a": "x"}, "test")
+	if err != nil {
+		t.Fatalf("errcode 0 as JSON number should succeed: %v", err)
+	}
+	if payload["errcode"].(float64) != 0 {
+		t.Errorf("errcode: got %v", payload["errcode"])
+	}
+}
+
+func TestKPHPostErrcodeNonZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"errcode":1}`))
+	}))
+	defer server.Close()
+
+	a := NewKPHAdapter()
+	_, err := a.post(context.Background(), nil, server.URL, map[string]string{"a": "x"}, "test")
+	if err == nil {
+		t.Fatal("expected error for errcode=1")
+	}
+}
+
+func TestParamAsInt(t *testing.T) {
+	if paramAsInt(float64(30), 0) != 30 {
+		t.Errorf("float64: got %d want 30", paramAsInt(float64(30), 0))
+	}
+	if paramAsInt("12", 0) != 12 {
+		t.Errorf("string: got %d want 12", paramAsInt("12", 0))
+	}
+	if paramAsInt(8, 0) != 8 {
+		t.Errorf("int: got %d want 8", paramAsInt(8, 0))
+	}
+}

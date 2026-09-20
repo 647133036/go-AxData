@@ -122,6 +122,9 @@ func (a *TencentAdapter) requestQuote(ctx context.Context, symbols string) ([]ma
 		return nil, fmt.Errorf("tencent request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tencent HTTP %d", resp.StatusCode)
+	}
 
 	data, err := a.readAll(resp)
 	if err != nil {
@@ -164,6 +167,9 @@ func (a *TencentAdapter) requestKline(ctx context.Context, symbol string, params
 		return nil, fmt.Errorf("kline request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("kline HTTP %d", resp.StatusCode)
+	}
 
 	data, err := a.readAll(resp)
 	if err != nil {

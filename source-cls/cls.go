@@ -100,7 +100,10 @@ func (a *CLSAdapter) requestMarketEmotion(ctx context.Context) ([]map[string]int
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 
 	upDown, _ := body["up_down_dis"].(map[string]interface{})
 	board, _ := body["limit_up_board"].(map[string]interface{})
@@ -134,7 +137,10 @@ func (a *CLSAdapter) requestMarketWind(ctx context.Context) ([]map[string]interf
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 
 	items, _ := body["today_tuyere"].([]interface{})
 	results := make([]map[string]interface{}, 0)
@@ -174,7 +180,10 @@ func (a *CLSAdapter) requestMarketWindStocks(ctx context.Context, params map[str
 
 	results := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		results = append(results, normalizeCLSStock(m, map[string]interface{}{
 			"continuous_count": parseInt(m["continuous"]),
 		}))
@@ -191,7 +200,10 @@ func (a *CLSAdapter) requestMarketMainline(ctx context.Context) ([]map[string]in
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 
 	rows := make([]map[string]interface{}, 0)
 	for key, value := range body {
@@ -243,7 +255,10 @@ func (a *CLSAdapter) requestSectorList(ctx context.Context, secType, way string)
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 
 	items, _ := body["plate_data"].([]interface{})
 	results := make([]map[string]interface{}, 0)
@@ -280,7 +295,10 @@ func (a *CLSAdapter) requestSectorHeat(ctx context.Context) ([]map[string]interf
 
 	results := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		results = append(results, map[string]interface{}{
 			"plate_code":  cleanText(m["plate_code"]),
 			"plate_name":  cleanText(m["plate_name"]),
@@ -314,7 +332,10 @@ func (a *CLSAdapter) requestSectorPopularStocks(ctx context.Context, params map[
 
 	results := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		r := normalizeCLSStock(m, map[string]interface{}{
 			"change_text": cleanText(m["change"]),
 			"change_px":   parseFloat(m["change_px"]),
@@ -344,7 +365,10 @@ func (a *CLSAdapter) requestSectorRotation(ctx context.Context, params map[strin
 
 	rows := make([]map[string]interface{}, 0)
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		tradeDate := normalizeDateText(m["trade_date"])
 		if tradeDate == "" {
 			tradeDate = normalizeDateText(m["date"])
@@ -385,7 +409,10 @@ func (a *CLSAdapter) requestLimitUpPool(ctx context.Context) ([]map[string]inter
 
 	results := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		results = append(results, normalizeCLSStock(m, map[string]interface{}{
 			"up_reason": cleanText(m["up_reason"]),
 		}))
@@ -418,7 +445,10 @@ func (a *CLSAdapter) requestStockTimeline(ctx context.Context, params map[string
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 	items, _ := body["line"].([]interface{})
 
 	identity := identityFromCLSCode(secuCode)
@@ -496,7 +526,10 @@ func (a *CLSAdapter) requestStockKline(ctx context.Context, params map[string]in
 	identity := identityFromCLSCode(secuCode)
 	results := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
-		m := item.(map[string]interface{})
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
 		changePct := parseFloat(m["change_rate"])
 		if changePct == nil {
 			changePct = parseFloat(m["change_pct"])
@@ -535,7 +568,7 @@ func (a *CLSAdapter) requestNewsTelegraph(ctx context.Context, params map[string
 
 	dateText := normalizeDateText(params["date"])
 	if dateText == "" {
-		dateText = time.Now().Format("20060102")
+		dateText = time.Now().In(time.FixedZone("CST", 8*3600)).Format("20060102")
 	}
 
 	limit := positiveInt(params, "limit", 20)
@@ -574,7 +607,10 @@ func (a *CLSAdapter) requestNewsTelegraph(ctx context.Context, params map[string
 	if err != nil {
 		return nil, err
 	}
-	body := raw.(map[string]interface{})
+	body, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: expected object")
+	}
 	items, _ := body["roll_data"].([]interface{})
 
 	results := make([]map[string]interface{}, 0)
@@ -646,6 +682,9 @@ func (a *CLSAdapter) httpGet(ctx context.Context, urlStr string, rawParams map[s
 		return nil, fmt.Errorf("cls request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("cls HTTP %d", resp.StatusCode)
+	}
 
 	return io.ReadAll(resp.Body)
 }
@@ -698,6 +737,8 @@ func mobileStyleRaw(data []byte, context string) (interface{}, error) {
 			if v != "0" {
 				return nil, fmt.Errorf("%s returned error: errno=%s", context, v)
 			}
+		default:
+			return nil, fmt.Errorf("%s returned unexpected errno type: %T(%v)", context, errno, errno)
 		}
 	}
 	d := raw["data"]

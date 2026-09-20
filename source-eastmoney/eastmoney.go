@@ -300,6 +300,9 @@ func (a *EastMoneyAdapter) httpGet(ctx context.Context, targetURL string, refere
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, targetURL)
+	}
 	return io.ReadAll(resp.Body)
 }
 
@@ -589,6 +592,9 @@ func (a *EastMoneyAdapter) requestIsTradeDay(ctx context.Context, params map[str
 		return nil, fmt.Errorf("is_trade_day request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("is_trade_day HTTP %d", resp.StatusCode)
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -626,6 +632,9 @@ func (a *EastMoneyAdapter) requestTradeDays(ctx context.Context, params map[stri
 		return nil, fmt.Errorf("trade_days request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("trade_days HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

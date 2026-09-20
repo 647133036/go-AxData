@@ -479,9 +479,14 @@ func PeriodOf(reportDate string) string {
 
 // CashFlowSeries returns FCF history for a DCF model, oldest first.
 func CashFlowSeries(statements []Statement) valuation.CashFlows {
-	fcf := make([]float64, 0, len(statements))
-	ocf := make([]float64, 0, len(statements))
-	for _, st := range statements {
+	sorted := make([]Statement, len(statements))
+	copy(sorted, statements)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ReportDate < sorted[j].ReportDate
+	})
+	fcf := make([]float64, 0, len(sorted))
+	ocf := make([]float64, 0, len(sorted))
+	for _, st := range sorted {
 		if st.ReportDate == "" {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -26,7 +27,7 @@ var _HTTP_HEADERS = map[string]string{
 var _HOT_URL = "https://dq.10jqka.com.cn/fuyao/hot_list_data/out/hot_list/v1/stock"
 var _DETAIL_URL = "http://push2delay.eastmoney.com/api/qt/ulist.np/get"
 
-var _DIGIT_RE = regexp.MustCompile(`[^\d.]`)
+var _DIGIT_RE = regexp.MustCompile(`[^\d]`)
 
 func NewTHSAdapter() *THSAdapter {
 	return &THSAdapter{
@@ -85,6 +86,9 @@ func (a *THSAdapter) getHotRank(ctx context.Context, limit int) ([]map[string]in
 		return nil, fmt.Errorf("hot rank request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("hot rank HTTP %d", resp.StatusCode)
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -134,7 +138,7 @@ func (a *THSAdapter) getHotRank(ctx context.Context, limit int) ([]map[string]in
 
 	if len(secids) > 0 {
 		if err := a.enrichPrices(ctx, result, secids); err != nil {
-			fmt.Printf("enrich prices warning: %v\n", err)
+			log.Printf("enrich prices warning: %v", err)
 		}
 	}
 

@@ -202,6 +202,7 @@ func (s *Service) Compare(ctx context.Context, code string, limit int) ([]Compar
 			c.BeatPct = beatPct(a, c.Midpoint)
 			c.Verdict = judge(c.BeatPct)
 		} else {
+			c.Verdict = VerdictUnavailable
 			c.Reason = "未找到对应报告期财报数据，无法比较"
 		}
 		out = append(out, c)

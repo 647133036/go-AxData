@@ -581,13 +581,13 @@ func (a *KPHAdapter) requestMarketReviewEvents(ctx context.Context, params map[s
 
 	limit := 30
 	if v, ok := params["limit"]; ok {
-		if iv, ok := v.(int); ok && iv > 0 {
+		if iv := paramAsInt(v, 0); iv > 0 {
 			limit = iv
 		}
 	}
 	offset := 0
 	if v, ok := params["offset"]; ok {
-		if iv, ok := v.(int); ok && iv >= 0 {
+		if iv := paramAsInt(v, -1); iv >= 0 {
 			offset = iv
 		}
 	}
@@ -739,6 +739,9 @@ func (a *KPHAdapter) post(ctx context.Context, params map[string]interface{}, ho
 		return nil, fmt.Errorf("%s request failed: %w", context, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("%s HTTP %d", context, resp.StatusCode)
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -750,9 +753,11 @@ func (a *KPHAdapter) post(ctx context.Context, params map[string]interface{}, ho
 		return nil, fmt.Errorf("%s returned invalid JSON", context)
 	}
 
-	errcode := payload["errcode"]
-	if errcode != nil && errcode != 0 && errcode != "0" {
-		return nil, fmt.Errorf("%s returned errcode=%v", context, errcode)
+	if errcode, ok := payload["errcode"]; ok && errcode != nil {
+		s := valueToString(errcode)
+		if s != "" && s != "0" {
+			return nil, fmt.Errorf("%s returned errcode=%v", context, errcode)
+		}
 	}
 	return payload, nil
 }
@@ -934,6 +939,27 @@ func cleanText(v interface{}) *string {
 		return nil
 	}
 	return &text
+}
+
+func paramAsInt(v interface{}, defaultv int) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(t))
+		if err != nil {
+			return defaultv
+		}
+		return n
+	default:
+		return defaultv
+	}
 }
 
 func valueToString(v interface{}) string {

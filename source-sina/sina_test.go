@@ -49,8 +49,7 @@ func TestSinaRequestNoInterface(t *testing.T) {
 }
 
 func TestSina_requestRealTime_429(t *testing.T) {
-	// Sina httpGet does not check HTTP status codes - it reads the body regardless.
-	// A 429 returns empty body, parseRealTime returns 0 results.
+	// httpGet rejects non-200 responses.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
 	}))
@@ -60,11 +59,11 @@ func TestSina_requestRealTime_429(t *testing.T) {
 	a.baseURL = server.URL
 
 	results, err := a.requestRealTime(context.Background(), "sz000001")
-	if err != nil {
-		t.Fatalf("requestRealTime failed: %v", err)
+	if err == nil {
+		t.Fatalf("expected error for HTTP 429, got results: %v", results)
 	}
-	if len(results) != 0 {
-		t.Errorf("Expected 0 results from 429, got %d", len(results))
+	if results != nil {
+		t.Errorf("Expected nil results from 429, got %d", len(results))
 	}
 }
 

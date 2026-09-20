@@ -106,7 +106,10 @@ func (a *adapter) requestSpot(ctx context.Context, params map[string]interface{}
 		return nil, err
 	}
 
-	payload := data.(map[string]interface{})
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("board rank: unexpected JSON type")
+	}
 	// JSON numbers unmarshal to float64, so compare against 0.0; comparing
 	// against the untyped int literal 0 always fails for a numeric code and
 	// would report every successful response as an error.
@@ -164,6 +167,9 @@ func (a *adapter) requestKline(ctx context.Context, params map[string]interface{
 		adjust = "qfq"
 	}
 	limit, _ := paramInt(params, "limit", 120)
+	if limit < 1 {
+		limit = 120
+	}
 	if limit > 640 {
 		limit = 640
 	}
@@ -184,9 +190,14 @@ func (a *adapter) requestKline(ctx context.Context, params map[string]interface{
 		if err != nil {
 			continue
 		}
-		payload := data.(map[string]interface{})
-		if code := payload["code"]; code != nil && code != 0 && code != "0" {
+		payload, ok := data.(map[string]interface{})
+		if !ok {
 			continue
+		}
+		if code := payload["code"]; code != nil {
+			if f, ok := code.(float64); !ok || f != 0 {
+				continue
+			}
 		}
 
 		adjustKey := map[string]string{
@@ -268,6 +279,9 @@ func (a *adapter) requestTick(ctx context.Context, params map[string]interface{}
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("tick HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -343,9 +357,14 @@ func (a *adapter) requestStartYear(ctx context.Context, params map[string]interf
 	if err != nil {
 		return nil, err
 	}
-	payload := data.(map[string]interface{})
-	if code := payload["code"]; code != nil && code != 0 && code != "0" {
+	payload, ok := data.(map[string]interface{})
+	if !ok {
 		return []map[string]interface{}{}, nil
+	}
+	if code := payload["code"]; code != nil {
+		if f, ok := code.(float64); !ok || f != 0 {
+			return []map[string]interface{}{}, nil
+		}
 	}
 
 	source := payload["data"]
@@ -401,7 +420,7 @@ func (a *adapter) requestSnapshot(ctx context.Context, params map[string]interfa
 	}
 
 	codes := formatSymbols(symbols)
-	u := fmt.Sprintf(TencentQuoteURL, url.PathEscape(codes))
+	u := fmt.Sprintf(TencentQuoteURL, codes)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
@@ -416,6 +435,9 @@ func (a *adapter) requestSnapshot(ctx context.Context, params map[string]interfa
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("quote HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -443,6 +465,9 @@ func (a *adapter) fetchJSON(ctx context.Context, u string) (interface{}, error) 
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -471,6 +496,9 @@ func (a *adapter) fetchKline(ctx context.Context, u string) (interface{}, error)
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("kline HTTP %d", resp.StatusCode)
+	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -517,10 +545,13 @@ func cleanSymbol(symbol string) string {
 		return s
 	}
 
+	if strings.HasPrefix(s, "92") {
+		return "bj" + s
+	}
 	if strings.HasPrefix(s, "6") || strings.HasPrefix(s, "5") || strings.HasPrefix(s, "9") {
 		return "sh" + s
 	}
-	if strings.HasPrefix(s, "4") || strings.HasPrefix(s, "8") || strings.HasPrefix(s, "92") {
+	if strings.HasPrefix(s, "4") || strings.HasPrefix(s, "8") {
 		return "bj" + s
 	}
 	return "sz" + s

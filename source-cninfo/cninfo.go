@@ -172,6 +172,9 @@ func (a *CNINFOAdapter) webapiFetch(ctx context.Context, method string, u string
 		return nil, fmt.Errorf("cninfo webapi request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo webapi request: %w", err)
@@ -230,6 +233,9 @@ func (a *CNINFOAdapter) formFetch(ctx context.Context, method string, u string, 
 		return nil, fmt.Errorf("cninfo form request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	dataBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo form request: %w", err)
@@ -260,6 +266,9 @@ func (a *CNINFOAdapter) jsonFetch(ctx context.Context, u string, headers map[str
 		return nil, fmt.Errorf("cninfo json request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo json request: %w", err)
@@ -294,6 +303,9 @@ func (a *CNINFOAdapter) jsonFetchPOST(ctx context.Context, u string, body interf
 		return nil, fmt.Errorf("cninfo json post request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo json post request: %w", err)
@@ -809,6 +821,9 @@ func (a *CNINFOAdapter) requestIRMQuestions(ctx context.Context, params map[stri
 		return nil, fmt.Errorf("cninfo IRM request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo IRM request: %w", err)
@@ -856,6 +871,9 @@ func (a *CNINFOAdapter) requestIRMAnswer(ctx context.Context, params map[string]
 		return nil, fmt.Errorf("cninfo IRM detail request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("cninfo IRM detail request: %w", err)
@@ -1000,7 +1018,11 @@ func (a *CNINFOAdapter) loadStockIndex(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		index[code.(string)] = m
+		codeStr, ok := code.(string)
+		if !ok {
+			continue
+		}
+		index[codeStr] = m
 	}
 	a.stockIndex = index
 	return nil
@@ -1023,6 +1045,9 @@ func (a *CNINFOAdapter) fetchIRMOrgID(ctx context.Context, symbol string) (strin
 		return "", fmt.Errorf("cninfo IRM org lookup: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -1049,7 +1074,11 @@ func (a *CNINFOAdapter) fetchIRMOrgID(ctx context.Context, symbol string) (strin
 	if !ok {
 		return "", fmt.Errorf("cninfo IRM: missing secid for %s", symbol)
 	}
-	return secid.(string), nil
+	secidStr, ok := secid.(string)
+	if !ok {
+		return "", fmt.Errorf("cninfo IRM: secid is not a string for %s", symbol)
+	}
+	return secidStr, nil
 }
 
 // fetchPDFMetadata fetches HEAD request metadata for a PDF URL.

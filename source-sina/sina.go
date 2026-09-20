@@ -89,8 +89,11 @@ func (a *SinaAdapter) requestKline(ctx context.Context, symbol string, params ma
 		scale = periodToScale(period)
 	}
 	limit := 2048
-	if l, ok := params["limit"].(int); ok {
+	switch l := params["limit"].(type) {
+	case int:
 		limit = l
+	case float64:
+		limit = int(l)
 	}
 
 	// K-line uses the same CN_MarketData.getKLineData service as history,
@@ -134,6 +137,9 @@ func (a *SinaAdapter) requestRank(ctx context.Context) ([]map[string]interface{}
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, apiURL)
+	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -182,8 +188,11 @@ func (a *SinaAdapter) requestHistory(ctx context.Context, symbol string, params 
 		scale = periodToScale(period)
 	}
 	limit := 500
-	if l, ok := params["limit"].(int); ok {
+	switch l := params["limit"].(type) {
+	case int:
 		limit = l
+	case float64:
+		limit = int(l)
 	}
 
 	apiURL := fmt.Sprintf(
@@ -210,7 +219,7 @@ func (a *SinaAdapter) parseRealTime(raw string) ([]map[string]interface{}, error
 		data := match[2]
 		fields := strings.Split(data, ",")
 
-		if len(fields) < 30 {
+		if len(fields) < 32 {
 			continue
 		}
 
@@ -400,6 +409,9 @@ func (a *SinaAdapter) httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
 
 	return io.ReadAll(resp.Body)
 }
